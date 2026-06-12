@@ -1,0 +1,22 @@
+# Déploiement Render (https://render.com) — hébergement par défaut.
+# 1. Pousser ce dépôt sur GitHub.
+# 2. Sur Render : New > Blueprint, pointer vers le dépôt -> render.yaml détecté.
+# 3. Dans le dashboard, renseigner ANTHROPIC_API_KEY (jamais dans le dépôt).
+services:
+  - type: web
+    name: prediction-foot
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/competitions
+    envVars:
+      # Couche actualité OFF par défaut (coût API réel). Passer à "true" si voulu.
+      - key: QUALITATIVE_LAYER_ENABLED
+        value: "false"
+      # Clé API officielle Anthropic : saisie À LA MAIN dans le dashboard Render.
+      # sync:false => Render ne lit JAMAIS la valeur depuis le dépôt.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Endpoint officiel par défaut (laisser vide).
+      - key: ANTHROPIC_BASE_URL
+        value: ""

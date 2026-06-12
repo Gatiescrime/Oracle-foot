@@ -1,0 +1,27 @@
+# Secrets — JAMAIS dans l'image
+.env
+.claude/
+
+# Environnements et caches Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Données volumineuses régénérables (on EMBARQUE la base + les modèles, pas le cache)
+data/cache/
+data/refresh.log
+*.parquet
+
+# Outils de dev / build non nécessaires à l'exécution
+tests/
+docs/
+packaging/
+.github/
+.git/
+.DS_Store
+README.md
+run.sh
+run.bat

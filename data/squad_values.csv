@@ -1,0 +1,142 @@
+# Valeur marchande approximative des effectifs (proxy de niveau, Phase P5).
+# Unité : millions d'euros (somme des valeurs des joueurs, ordre de grandeur type
+# Transfermarkt). Éditable et versionné. La colonne `team` est appariée à nos noms
+# canoniques par appariement flou (pipeline/squad_value.py) ; une équipe absente
+# donne une feature NaN (gérée nativement par XGBoost). Les commentaires (#) et les
+# lignes vides sont ignorés.
+team,value_meur
+# --- Premier League ---
+Man City,1300
+Arsenal,1250
+Chelsea,1100
+Liverpool,950
+Man United,850
+Tottenham,800
+Newcastle,700
+Aston Villa,650
+Brighton,550
+West Ham,480
+Bournemouth,420
+Crystal Palace,420
+Brentford,400
+Nott'm Forest,400
+Fulham,380
+Everton,350
+Wolves,350
+Leeds,260
+Leicester,300
+Southampton,280
+Ipswich,230
+Burnley,220
+Sheffield United,200
+Sunderland,180
+Watford,160
+Norwich,150
+Luton,130
+# --- La Liga ---
+Real Madrid,1300
+Barcelona,1100
+Ath Madrid,750
+Sociedad,420
+Ath Bilbao,420
+Villarreal,380
+Betis,350
+Sevilla,320
+Girona,300
+Valencia,280
+Celta,200
+Osasuna,180
+Mallorca,170
+Getafe,160
+Espanol,150
+Vallecano,150
+Las Palmas,140
+Alaves,130
+Almeria,130
+Cadiz,120
+Granada,120
+Leganes,110
+Valladolid,110
+Levante,110
+Elche,100
+Oviedo,80
+# --- Serie A ---
+Inter,700
+Juventus,650
+Milan,600
+Napoli,550
+Roma,500
+Atalanta,450
+Lazio,400
+Fiorentina,350
+Bologna,300
+Torino,250
+Udinese,220
+Genoa,200
+Como,200
+Monza,180
+Sassuolo,180
+Parma,160
+Lecce,150
+Cagliari,150
+Verona,140
+Empoli,130
+Salernitana,130
+Venezia,120
+Frosinone,120
+Sampdoria,120
+Spezia,100
+Cremonese,90
+Pisa,80
+# --- Bundesliga ---
+Bayern Munich,900
+Leverkusen,500
+RB Leipzig,480
+Dortmund,450
+Stuttgart,350
+Ein Frankfurt,350
+Freiburg,250
+Wolfsburg,250
+Hoffenheim,220
+M'gladbach,220
+Werder Bremen,180
+Union Berlin,180
+Mainz,160
+Augsburg,150
+FC Koln,150
+Hertha,120
+Bochum,100
+Heidenheim,100
+Schalke 04,100
+St Pauli,90
+Hamburg,90
+Darmstadt,80
+Holstein Kiel,70
+Bielefeld,50
+Greuther Furth,40
+# --- Ligue 1 ---
+Paris SG,1100
+Monaco,450
+Marseille,350
+Lyon,300
+Lille,280
+Nice,280
+Rennes,250
+Lens,250
+Strasbourg,200
+Toulouse,150
+Reims,150
+Nantes,140
+Brest,130
+Montpellier,130
+Lorient,110
+Bordeaux,100
+Paris FC,90
+Le Havre,90
+St Etienne,90
+Auxerre,90
+Angers,80
+Metz,80
+Clermont,70
+Troyes,70
+Ajaccio,50

@@ -1,0 +1,29 @@
+# Secrets — contiennent des clés/jetons, JAMAIS versionnés
+.env
+.claude/settings.json
+claude_code_settings.json
+PROMPT_CLAUDE_CODE.md
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Données volumineuses / générées
+# NB : data/football.db est VOLONTAIREMENT versionnée (snapshot pour builds repro
+# et démarrage hors ligne). On ignore seulement le cache et les logs régénérables.
+*.parquet
+data/cache/
+data/*.log
+data/*_result.json
+
+# Artefacts de build PyInstaller
+build/
+dist/
+
+# Divers
+.DS_Store
+.ipynb_checkpoints/

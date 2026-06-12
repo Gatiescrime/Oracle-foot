@@ -1,0 +1,8 @@
+{
+  "domain": "club",
+  "n_matches": 8907,
+  "trained_on": "2026-06-12",
+  "n_teams": 130,
+  "has_xgb": true,
+  "calibrated": true
+}

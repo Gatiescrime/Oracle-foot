@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oracle Foot — prédictions et paris</title>
+  <meta name="description" content="Probabilités de matchs de football calibrées et recommandations de paris : clubs et Coupe du Monde 2026.">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Aller au contenu</a>
+  <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">Oracle&nbsp;Foot</span>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button class="tab is-active" role="tab" aria-selected="true" data-view="predict">Analyser un match</button>
+      <button class="tab" role="tab" aria-selected="false" data-view="wc">Coupe du Monde 2026</button>
+    </nav>
+    <button id="refreshBtn" class="ghost-btn" title="Télécharger les derniers résultats">
+      <span class="dot" aria-hidden="true"></span> Mettre à jour
+    </button>
+  </header>
+
+  <main id="main">
+
+    <!-- ============================ VUE ANALYSE ============================ -->
+    <section id="view-predict" class="view is-active" aria-label="Analyser un match">
+
+      <div class="hero">
+        <h1>Quel pari vaut le coup&nbsp;?</h1>
+        <p class="lede">Choisis deux équipes. On calcule les probabilités réelles du match et on te dit où se cache la meilleure valeur. Pas besoin de t'y connaître en foot.</p>
+      </div>
+
+      <form id="predictForm" class="panel control" autocomplete="off">
+        <div class="field">
+          <label for="competition">Compétition</label>
+          <select id="competition" required></select>
+        </div>
+        <div class="matchup">
+          <div class="field">
+            <label for="home">Équipe à domicile</label>
+            <select id="home" required></select>
+          </div>
+          <div class="vs" aria-hidden="true">vs</div>
+          <div class="field">
+            <label for="away">Équipe à l'extérieur</label>
+            <select id="away" required></select>
+          </div>
+        </div>
+
+        <div class="control-actions">
+          <button type="submit" class="cta" id="analyzeBtn">Analyser le match</button>
+          <label class="switch" title="Affiche les réglages manuels">
+            <input type="checkbox" id="advToggle">
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-label">Mode avancé</span>
+          </label>
+        </div>
+
+        <!-- ----------------------- MODE AVANCÉ ----------------------- -->
+        <div id="advanced" class="advanced" hidden>
+          <p class="adv-hint">Par défaut, tout est déjà réglé au mieux pour le match. N'ouvre ceci que si tu veux ajuster à la main.</p>
+
+          <div class="adv-grid">
+            <label class="switch sm" title="Pour un match sur terrain neutre (ex. Coupe du Monde)">
+              <input type="checkbox" id="neutral">
+              <span class="switch-track" aria-hidden="true"></span>
+              <span class="switch-label">Terrain neutre</span>
+            </label>
+
+            <label class="switch sm" title="Cherche en ligne les blessures et absences récentes (consomme l'API, coût réel)">
+              <input type="checkbox" id="useQualitative">
+              <span class="switch-track" aria-hidden="true"></span>
+              <span class="switch-label">Tenir compte de l'actu <span class="tag-cost">coût</span></span>
+            </label>
+          </div>
+
+          <div class="adv-block">
+            <h3>Calculer une mise <span class="info" tabindex="0" role="note" aria-label="On compare la cote que tu vois chez ton bookmaker à la probabilité réelle, et on te conseille combien miser.">i</span></h3>
+            <div class="adv-grid three">
+              <div class="field">
+                <label for="selection">Sur quelle issue&nbsp;?</label>
+                <select id="selection">
+                  <option value="">—</option>
+                  <option value="home">Victoire domicile</option>
+                  <option value="draw">Match nul</option>
+                  <option value="away">Victoire extérieur</option>
+                  <option value="over25">Plus de 2,5 buts</option>
+                  <option value="under25">Moins de 2,5 buts</option>
+                  <option value="btts">Les deux marquent</option>
+                  <option value="btts_no">Pas les deux marquent</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="odds">Cote du bookmaker</label>
+                <input type="number" id="odds" step="0.01" min="1.01" placeholder="ex. 2.10">
+              </div>
+              <div class="field">
+                <label for="bankroll">Ton capital (€)</label>
+                <input type="number" id="bankroll" step="1" min="1" value="100">
+              </div>
+            </div>
+          </div>
+
+          <div class="adv-block">
+            <h3>Buteurs — joueurs absents <span class="info" tabindex="0" role="note" aria-label="Noms séparés par des virgules. Un joueur listé est retiré du calcul des buteurs.">i</span></h3>
+            <div class="adv-grid">
+              <div class="field">
+                <label for="unavHome">Absents domicile</label>
+                <input type="text" id="unavHome" placeholder="ex. Haaland, Foden">
+              </div>
+              <div class="field">
+                <label for="unavAway">Absents extérieur</label>
+                <input type="text" id="unavAway" placeholder="ex. Saka">
+              </div>
+            </div>
+          </div>
+        </div>
+      </form>
+
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+
+      <!-- ----------------------- RÉSULTATS ----------------------- -->
+      <div id="results" class="results" hidden>
+
+        <div class="panel reco" id="recoCard">
+          <div class="reco-head">
+            <span class="reco-kicker">Notre lecture du match</span>
+            <h2 id="recoTitle">—</h2>
+            <p id="recoText" class="reco-text">—</p>
+          </div>
+          <div class="reco-confidence">
+            <span class="rc-label">Confiance</span>
+            <div class="rc-bar"><i id="recoBar"></i></div>
+            <span id="recoPct" class="rc-pct">—</span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3 class="block-title">Issue du match <span class="info" tabindex="0" role="note" aria-label="Probabilités calibrées de victoire, nul ou défaite.">i</span></h3>
+          <div id="oneXtwo" class="onextwo"></div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric">
+            <span class="m-label">Score le plus probable</span>
+            <span class="m-value" id="mScore">—</span>
+          </div>
+          <div class="metric">
+            <span class="m-label">Buts attendus <span class="info" tabindex="0" role="note" aria-label="Nombre moyen de buts que chaque équipe devrait marquer selon le modèle.">i</span></span>
+            <span class="m-value" id="mXg">—</span>
+          </div>
+          <div class="metric">
+            <span class="m-label">Plus de 2,5 buts</span>
+            <span class="m-value" id="mOver">—</span>
+          </div>
+          <div class="metric">
+            <span class="m-label">Les deux marquent <span class="info" tabindex="0" role="note" aria-label="Probabilité que les deux équipes marquent au moins un but.">i</span></span>
+            <span class="m-value" id="mBtts">—</span>
+          </div>
+        </div>
+
+        <div class="panel actu" id="actuCard" hidden>
+          <h3 class="block-title">Actualité prise en compte</h3>
+          <div id="actuBody"></div>
+        </div>
+
+        <div class="panel" id="valueCard" hidden>
+          <h3 class="block-title">Mise recommandée <span class="info" tabindex="0" role="note" aria-label="Méthode de Kelly fractionné, plafonnée. Ne mise que ce que tu peux te permettre de perdre.">i</span></h3>
+          <div id="valueBody"></div>
+        </div>
+
+        <div class="panel" id="oddsCard" hidden>
+          <h3 class="block-title">Meilleures cotes &amp; valeur</h3>
+          <div id="oddsBody"></div>
+        </div>
+
+        <details class="panel details" id="matrixCard">
+          <summary><span class="block-title">Voir tous les scores possibles</span></summary>
+          <div class="matrix-wrap"><div id="matrix" class="matrix"></div></div>
+          <p class="matrix-legend"><span class="ml-swatch cold"></span> peu probable <span class="ml-swatch hot"></span> très probable</p>
+        </details>
+
+        <div class="panel" id="scorersCard" hidden>
+          <h3 class="block-title">Buteurs probables <span class="info" tabindex="0" role="note" aria-label="Probabilité que le joueur marque à un moment du match. Clubs uniquement.">i</span></h3>
+          <div id="scorersBody" class="scorers"></div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ============================ VUE COUPE DU MONDE ============================ -->
+    <section id="view-wc" class="view" aria-label="Coupe du Monde 2026" hidden>
+      <div class="hero">
+        <h1>Coupe du Monde 2026</h1>
+        <p class="lede">Les vrais matchs à venir, et une simulation du tournoi pour voir qui a le plus de chances de soulever le trophée.</p>
+      </div>
+
+      <div class="panel">
+        <div class="wc-actions">
+          <button id="simBtn" class="cta">Simuler le tournoi</button>
+          <span id="simStatus" class="sim-status"></span>
+        </div>
+        <div id="simResult" class="sim-result"></div>
+      </div>
+
+      <div class="panel">
+        <h3 class="block-title">Matchs à venir</h3>
+        <div id="fixtures" class="fixtures">Chargement…</div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <p>Les probabilités sont des estimations, jamais des certitudes. Ceci n'est pas un conseil financier. Ne mise que ce que tu peux te permettre de perdre.</p>
+  </footer>
+
+  <!-- overlay mise à jour -->
+  <div id="refreshModal" class="modal" hidden>
+    <div class="modal-card">
+      <h3>Mettre à jour les données</h3>
+      <p class="modal-sub">Télécharge les derniers résultats et recalcule. Le mode complet réentraîne le modèle (1 à 2 minutes).</p>
+      <div class="modal-modes">
+        <label class="radio"><input type="radio" name="mode" value="rapide" checked> Rapide</label>
+        <label class="radio"><input type="radio" name="mode" value="complet"> Complet</label>
+      </div>
+      <div id="refreshProgress" class="refresh-progress" hidden><i></i><span>Mise à jour en cours…</span></div>
+      <div class="modal-actions">
+        <button class="ghost-btn" id="refreshCancel">Fermer</button>
+        <button class="cta" id="refreshStart">Lancer</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
