@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Oracle Foot — prédictions et paris</title>
   <meta name="description" content="Probabilités de matchs de football calibrées et recommandations de paris : clubs et Coupe du Monde 2026.">
+  <meta name="theme-color" content="#070b16">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+  <link rel="apple-touch-icon" href="/static/icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Oracle Foot">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -18,8 +25,11 @@
     </div>
     <nav class="tabs" role="tablist" aria-label="Sections">
       <button class="tab is-active" role="tab" aria-selected="true" data-view="predict">Analyser un match</button>
+      <button class="tab" role="tab" aria-selected="false" data-view="upcoming">Matchs à venir</button>
       <button class="tab" role="tab" aria-selected="false" data-view="wc">Coupe du Monde 2026</button>
+      <button class="tab" role="tab" aria-selected="false" data-view="track">Track record</button>
     </nav>
+    <span id="lastUpdated" class="last-updated" aria-live="polite"></span>
     <button id="refreshBtn" class="ghost-btn" title="Télécharger les derniers résultats">
       <span class="dot" aria-hidden="true"></span> Mettre à jour
     </button>
@@ -138,6 +148,11 @@
             <div class="rc-bar"><i id="recoBar"></i></div>
             <span id="recoPct" class="rc-pct">—</span>
           </div>
+          <div id="recoWhy" class="reco-why" hidden>
+            <span class="rw-label">Pourquoi</span>
+            <p id="recoWhySummary" class="rw-summary"></p>
+            <ul id="recoWhyList" class="rw-list"></ul>
+          </div>
         </div>
 
         <div class="panel">
@@ -193,6 +208,21 @@
       </div>
     </section>
 
+    <!-- ============================ VUE MATCHS À VENIR ============================ -->
+    <section id="view-upcoming" class="view" aria-label="Matchs à venir" hidden>
+      <div class="hero">
+        <h1>Matchs à venir</h1>
+        <p class="lede">Les prochaines affiches de plusieurs championnats et sélections. Un clic sur « Analyser » lance la prédiction du match.</p>
+      </div>
+
+      <div id="valueOfDay" class="panel value-of-day" hidden></div>
+
+      <div class="panel">
+        <p id="upcomingSrc" class="odds-src"></p>
+        <div id="upcomingList" class="upcoming">Chargement…</div>
+      </div>
+    </section>
+
     <!-- ============================ VUE COUPE DU MONDE ============================ -->
     <section id="view-wc" class="view" aria-label="Coupe du Monde 2026" hidden>
       <div class="hero">
@@ -212,6 +242,15 @@
         <h3 class="block-title">Matchs à venir</h3>
         <div id="fixtures" class="fixtures">Chargement…</div>
       </div>
+    </section>
+
+    <!-- ============================ VUE TRACK RECORD ============================ -->
+    <section id="view-track" class="view" aria-label="Track record du modèle" hidden>
+      <div class="hero">
+        <h1>Track record</h1>
+        <p class="lede">Les performances réelles du modèle, mesurées honnêtement en rejouant l'histoire dans l'ordre du temps. Sans enjolivure.</p>
+      </div>
+      <div id="trackBody">Chargement…</div>
     </section>
 
   </main>

@@ -60,17 +60,18 @@ body {
 .skip-link:focus { left: 12px; top: 12px; background: var(--green); color: #022; padding: 8px 14px; border-radius: 8px; z-index: 50; }
 
 .topbar {
-  display: flex; align-items: center; gap: 18px;
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
   max-width: 980px; margin: 0 auto; padding: 18px 22px;
 }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: 0.2px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: 0.2px; margin-right: auto; }
 .brand-mark { width: 22px; height: 22px; border-radius: 7px;
   background: conic-gradient(from 200deg, var(--green), var(--cyan), var(--violet), var(--green));
   box-shadow: 0 0 18px -2px var(--green); }
 .brand-name { font-size: 18px; }
-.tabs { display: flex; gap: 6px; margin-left: auto; }
+/* Les onglets occupent leur propre ligne (4 onglets ne tiennent pas avec la date). */
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; order: 3; flex-basis: 100%; justify-content: center; margin-top: 6px; }
 .tab {
-  background: transparent; border: 0; color: var(--muted); cursor: pointer;
+  background: transparent; border: 0; color: var(--muted); cursor: pointer; white-space: nowrap;
   font: inherit; font-size: 14px; padding: 8px 14px; border-radius: 999px; transition: 0.18s;
 }
 .tab:hover { color: var(--txt); background: rgba(255, 255, 255, 0.05); }
@@ -80,6 +81,7 @@ body {
   background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line-strong);
   color: var(--txt); font: inherit; font-size: 13px; padding: 8px 14px; border-radius: 999px; transition: 0.18s;
 }
+.last-updated { font-size: 12px; color: var(--faint); white-space: nowrap; }
 .ghost-btn:hover { background: rgba(255, 255, 255, 0.1); }
 .ghost-btn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); }
 
@@ -178,6 +180,12 @@ option { background: #0c1322; }
 .rc-bar { height: 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
 .rc-bar i { display: block; height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, var(--cyan), var(--green)); transition: width 0.9s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .rc-pct { font-size: 22px; font-weight: 700; }
+/* « pourquoi » : facteurs factuels sous la recommandation (pleine largeur) */
+.reco-why { flex-basis: 100%; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 12px; margin-top: 2px; }
+.rw-label { font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--cyan); }
+.rw-summary { margin: 6px 0 8px; color: var(--txt); font-size: 14px; }
+.rw-list { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+.rw-list li { margin: 3px 0; }
 
 /* 1X2 */
 .onextwo { display: flex; flex-direction: column; gap: 12px; }
@@ -189,6 +197,14 @@ option { background: #0c1322; }
 .bar-fill.draw { background: linear-gradient(90deg, #555f78, var(--draw)); }
 .bar-fill.away { background: linear-gradient(90deg, #c25a36, var(--away)); }
 .bar-row .pct { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* écussons d'équipe : drapeaux (sélections) + pastilles d'initiales (clubs / non mappé) */
+.team-badge { display: inline-block; vertical-align: middle; margin-right: 7px; flex: 0 0 auto; }
+.team-badge.flag { width: 22px; height: 16px; border-radius: 3px; object-fit: cover;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14); }
+.team-badge.pill { display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%; background: var(--pill, #4a5673);
+  color: #fff; font-size: 10px; font-weight: 700; line-height: 1; }
 
 /* metrics */
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }
@@ -265,6 +281,38 @@ table.odds td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .fx button { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line-strong); color: var(--txt); font: inherit; font-size: 12px; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
 .fx button:hover { background: var(--green); color: #04110b; border-color: var(--green); }
 
+/* matchs à venir (toutes compétitions) */
+.upcoming { display: flex; flex-direction: column; gap: 18px; }
+.up-day { display: flex; flex-direction: column; gap: 8px; }
+.up-date { margin: 0 0 2px; font-size: 13px; font-weight: 600; color: var(--cyan); }
+.fx.up { grid-template-columns: 60px 1fr auto auto; }
+.fx.up .date { font-variant-numeric: tabular-nums; }
+.up-comp { font-size: 12px; color: var(--faint); white-space: nowrap; }
+@media (max-width: 620px) {
+  .fx.up { grid-template-columns: 48px 1fr auto; }
+  .fx.up .up-comp { display: none; }
+}
+
+/* encart « meilleure value du jour » */
+.value-of-day { border-color: var(--green); background: linear-gradient(180deg, rgba(43, 213, 118, 0.08), var(--surface)); }
+.vod-list { display: flex; flex-direction: column; gap: 8px; }
+.vod-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 12px; align-items: center; width: 100%; text-align: left; font: inherit; color: var(--txt); cursor: pointer; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.vod-row:hover { border-color: var(--green); }
+.vod-match { font-size: 14px; }
+.vod-pick { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.vod-odds { font-size: 13px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.vod-book { display: block; font-size: 11px; color: var(--faint); }
+.vod-edge { font-weight: 700; color: var(--green); font-variant-numeric: tabular-nums; }
+.vod-note { margin: 12px 0 0; font-size: 12px; color: var(--faint); }
+@media (max-width: 620px) {
+  .vod-row { grid-template-columns: 1fr auto; row-gap: 4px; }
+  .vod-pick, .vod-odds { grid-column: 1; }
+}
+
+/* track record */
+.track-note { margin: 14px 0 0; font-size: 13px; color: var(--faint); line-height: 1.5; }
+.track-sub { margin: 18px 0 10px; font-size: 14px; color: var(--cyan); }
+
 /* footer */
 .foot { max-width: 980px; margin: 0 auto; padding: 20px 22px 40px; color: var(--faint); font-size: 12px; text-align: center; }
 
@@ -283,6 +331,7 @@ table.odds td.num { text-align: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 680px) {
   .topbar { flex-wrap: wrap; }
   .tabs { order: 3; width: 100%; margin-left: 0; }
+  .last-updated { display: none; }
   .control .matchup { grid-template-columns: 1fr; }
   .vs { display: none; }
   .metrics { grid-template-columns: 1fr 1fr; }

@@ -3,6 +3,22 @@
 const $ = (id) => document.getElementById(id);
 const pct = (p) => (p == null ? "—" : Math.round(p * 100) + "%");
 const f2 = (x) => (x == null ? "—" : Number(x).toFixed(2));
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/* Écusson : drapeau (sélection) ou pastille d'initiales (club / non mappé).
+   Les données viennent du backend (pipeline/badges.py) ; ici, pur affichage. */
+function badgeHTML(b) {
+  if (!b) return "";
+  if (b.kind === "flag") {
+    return `<img class="team-badge flag" alt="" loading="lazy" width="22" height="16"` +
+      ` src="https://flagcdn.com/32x24/${b.iso}.png"` +
+      ` srcset="https://flagcdn.com/64x48/${b.iso}.png 2x">`;
+  }
+  return `<span class="team-badge pill" aria-hidden="true" style="--pill:${b.color}">${esc(b.text)}</span>`;
+}
+// Étiquette d'option <select> : emoji drapeau si dispo (les <option> n'affichent pas d'image).
+const optLabel = (t) => (t.badge && t.badge.emoji ? t.badge.emoji + "  " : "") + t.name;
 
 let COMPS = { club: [], international: [] };
 let LASTPRED = null;
@@ -34,7 +50,21 @@ async function init() {
     setStatus("Impossible de charger les compétitions : " + e.message, true);
   }
   bindUI();
+  loadMeta();
   loadFixtures();
+}
+
+/* Date de dernière mise à jour des données, affichée discrètement dans l'en-tête. */
+async function loadMeta() {
+  try {
+    const m = await api("/api/meta");
+    const iso = m.last_updated || m.latest_match_date;
+    if (!iso) return;
+    const d = new Date(iso);
+    if (isNaN(d)) return;
+    const txt = d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    $("lastUpdated").textContent = "Données à jour au " + txt;
+  } catch (e) { /* l'en-tête reste simplement vide */ }
 }
 
 function currentDomain() {
@@ -47,7 +77,7 @@ async function loadTeams() {
   try {
     const data = await api("/api/teams?domain=" + domain);
     const teams = (data.teams || []).slice().sort((a, b) => (b.elo || 0) - (a.elo || 0));
-    const opts = teams.map((t) => `<option value="${t.id}">${t.name}</option>`).join("");
+    const opts = teams.map((t) => `<option value="${t.id}">${optLabel(t)}</option>`).join("");
     $("home").innerHTML = opts;
     $("away").innerHTML = opts;
     if (teams.length > 1) $("away").selectedIndex = 1;
@@ -76,10 +106,28 @@ function switchView(view) {
     t.classList.toggle("is-active", on);
     t.setAttribute("aria-selected", on ? "true" : "false");
   });
-  $("view-predict").classList.toggle("is-active", view === "predict");
-  $("view-predict").hidden = view !== "predict";
-  $("view-wc").classList.toggle("is-active", view === "wc");
-  $("view-wc").hidden = view !== "wc";
+  const VIEWS = { predict: "view-predict", upcoming: "view-upcoming", wc: "view-wc", track: "view-track" };
+  Object.entries(VIEWS).forEach(([v, id]) => {
+    const on = v === view;
+    $(id).classList.toggle("is-active", on);
+    $(id).hidden = !on;
+  });
+  if (view === "upcoming") loadUpcoming();
+  if (view === "track") loadTrackRecord();
+}
+
+/* Ouvre la prédiction d'un match donné (réutilisé par « Matchs à venir » et la CdM). */
+function analyzeMatch(competition, homeId, awayId, neutral) {
+  switchView("predict");
+  if ([...$("competition").options].some((o) => o.value === competition)) $("competition").value = competition;
+  loadTeams().then(() => {
+    $("home").value = homeId;
+    $("away").value = awayId;
+    $("neutral").checked = !!neutral;
+    if (neutral) { $("advToggle").checked = true; $("advanced").hidden = false; }
+    $("predictForm").requestSubmit();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
 }
 
 function setStatus(msg, err) {
@@ -127,9 +175,9 @@ async function onAnalyze(e) {
 
 function renderPrediction(p) {
   const probs = [
-    { key: "home", label: p.home, v: p.p_home_win, cls: "home" },
-    { key: "draw", label: "Match nul", v: p.p_draw, cls: "draw" },
-    { key: "away", label: p.away, v: p.p_away_win, cls: "away" },
+    { key: "home", label: p.home, v: p.p_home_win, cls: "home", badge: p.home_badge },
+    { key: "draw", label: "Match nul", v: p.p_draw, cls: "draw", badge: null },
+    { key: "away", label: p.away, v: p.p_away_win, cls: "away", badge: p.away_badge },
   ];
   const best = probs.slice().sort((a, b) => (b.v || 0) - (a.v || 0))[0];
 
@@ -150,9 +198,20 @@ function renderPrediction(p) {
   $("recoPct").textContent = pct(bp);
   requestAnimationFrame(() => { $("recoBar").style.width = Math.round(bp * 100) + "%"; });
 
+  // « pourquoi » : facteurs factuels (Elo, forme récente, terrain) calculés côté serveur
+  const why = p.why;
+  const whyBox = $("recoWhy");
+  if (why && (why.summary || (why.factors || []).length)) {
+    $("recoWhySummary").textContent = why.summary || "";
+    $("recoWhyList").innerHTML = (why.factors || []).map((f) => `<li>${esc(f)}</li>`).join("");
+    whyBox.hidden = false;
+  } else {
+    whyBox.hidden = true;
+  }
+
   // barres 1X2
   $("oneXtwo").innerHTML = probs.map((o) =>
-    `<div class="bar-row"><span class="name" title="${o.label}">${o.label}</span>
+    `<div class="bar-row"><span class="name" title="${esc(o.label)}">${badgeHTML(o.badge)}${esc(o.label)}</span>
      <div class="bar-track"><div class="bar-fill ${o.cls}" data-w="${Math.round((o.v || 0) * 100)}"></div></div>
      <span class="pct">${pct(o.v)}</span></div>`).join("");
   requestAnimationFrame(() => {
@@ -361,6 +420,177 @@ async function loadScorers(competition, home, away, neutral, useQ) {
   } catch (e) { /* caché */ }
 }
 
+/* ---------------------------------------------------------- Matchs à venir */
+let UPCOMING_LOADED = false;
+
+function formatDay(iso) {
+  const d = new Date(iso + "T00:00:00");
+  if (isNaN(d)) return iso;
+  const s = d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function upcomingRow(m) {
+  const time = m.commence_time
+    ? new Date(m.commence_time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    : "";
+  return `<div class="fx up">
+    <span class="date">${time}</span>
+    <span class="teams">${badgeHTML(m.home_badge)}${esc(m.home)} <span style="color:var(--faint)">vs</span> ${badgeHTML(m.away_badge)}${esc(m.away)}</span>
+    <span class="up-comp">${esc(m.competition)}</span>
+    <button data-c="${esc(m.competition)}" data-h="${esc(m.home_team_id)}" data-a="${esc(m.away_team_id)}" data-n="${m.neutral ? "1" : "0"}">Analyser</button>
+  </div>`;
+}
+
+async function loadUpcoming(force) {
+  if (UPCOMING_LOADED && !force) return;
+  const host = $("upcomingList");
+  host.innerHTML = '<p style="color:var(--muted)">Chargement…</p>';
+  loadValueOfDay();
+  try {
+    const data = await api("/api/upcoming?days=7");
+    UPCOMING_LOADED = true;
+    const matches = data.matches || [];
+    if (!matches.length) {
+      host.innerHTML = '<p style="color:var(--muted)">Aucune affiche dans les prochains jours.</p>';
+      $("upcomingSrc").textContent = "";
+      return;
+    }
+    const groups = {};
+    matches.forEach((m) => { (groups[m.date] = groups[m.date] || []).push(m); });
+    const days = Object.keys(groups).sort();
+    host.innerHTML = days.map((day) =>
+      `<div class="up-day"><h4 class="up-date">${formatDay(day)}</h4>${groups[day].map(upcomingRow).join("")}</div>`
+    ).join("");
+    host.querySelectorAll("button[data-h]").forEach((b) => b.addEventListener("click",
+      () => analyzeMatch(b.dataset.c, b.dataset.h, b.dataset.a, b.dataset.n === "1")));
+    $("upcomingSrc").textContent = data.source === "the-odds-api"
+      ? "Affiches et meilleures cotes via the-odds-api."
+      : (data.source === "fixtures"
+        ? "Affiches issues du calendrier (cotes indisponibles sans clé API)."
+        : "");
+  } catch (e) {
+    host.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`;
+  }
+}
+
+/* Encart « Meilleure value du jour » : meilleurs écarts modèle vs cotes du marché. */
+async function loadValueOfDay() {
+  const card = $("valueOfDay");
+  try {
+    const data = await api("/api/value/today?days=3&top_n=3");
+    const items = data.items || [];
+    if (!items.length) {
+      // sans clé OU sans value trouvée : on n'encombre pas l'écran
+      card.hidden = true;
+      return;
+    }
+    const rows = items.map((it) => {
+      const teams = `${badgeHTML(it.home_badge)}${esc(it.home)} <span style="color:var(--faint)">vs</span> ${badgeHTML(it.away_badge)}${esc(it.away)}`;
+      const edge = (it.edge >= 0 ? "+" : "") + Math.round(it.edge * 100) + "%";
+      return `<button class="vod-row" data-c="${esc(it.competition)}" data-h="${esc(it.home_team_id)}" data-a="${esc(it.away_team_id)}" data-n="${it.neutral ? "1" : "0"}">
+        <span class="vod-match">${teams}</span>
+        <span class="vod-pick">${esc(it.label)}</span>
+        <span class="vod-odds">cote ${f2(it.best_odds)}<span class="vod-book">${esc(it.book || "")}</span></span>
+        <span class="vod-edge">${edge}</span>
+      </button>`;
+    }).join("");
+    card.innerHTML =
+      `<h3 class="block-title">Meilleure value du jour <span class="info" tabindex="0" role="note" aria-label="Écart entre la probabilité du modèle et la meilleure cote du marché. Une value n'est jamais une garantie de gain.">i</span></h3>
+       <div class="vod-list">${rows}</div>
+       <p class="vod-note">La value compare la cote la plus haute trouvée à la probabilité du modèle. Ce n'est pas une garantie de gain : ne mise que ce que tu peux te permettre de perdre.</p>`;
+    card.querySelectorAll(".vod-row").forEach((b) => b.addEventListener("click",
+      () => analyzeMatch(b.dataset.c, b.dataset.h, b.dataset.a, b.dataset.n === "1")));
+    card.hidden = false;
+  } catch (e) {
+    card.hidden = true;
+  }
+}
+
+/* ------------------------------------------------------------- Track record */
+let TRACK_LOADED = false;
+const f3 = (x) => (x == null ? "—" : Number(x).toFixed(3));
+const intFmt = (n) => (n == null ? "—" : Number(n).toLocaleString("fr-FR"));
+
+function calibrationTable(rows) {
+  const kept = (rows || []).filter((r) => (r.effectif || 0) >= 100);
+  if (!kept.length) return "";
+  const body = kept.map((r) => {
+    const gap = Math.abs((r.observe || 0) - (r.predit_moyen || 0));
+    return `<tr class="${gap <= 0.03 ? "value-row" : ""}">
+      <td>${pct(r.predit_moyen)}</td>
+      <td class="num">${pct(r.observe)}</td>
+      <td class="num">${intFmt(r.effectif)}</td>
+    </tr>`;
+  }).join("");
+  return `<table class="odds"><thead><tr><th>Le modèle annonce…</th><th>…ça arrive</th><th>Matchs</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function renderTrackRecord(data) {
+  const club = data.club || {};
+  const intl = data.international || {};
+  const vb = club.value_betting || {};
+  const gapBook = (club.rps_model_on_odds_subset != null && club.rps_bookmaker != null)
+    ? club.rps_model_on_odds_subset - club.rps_bookmaker : null;
+
+  const intro =
+    `<div class="panel" style="border-color:rgba(255,255,255,0.12)">
+      <p style="margin:0;color:var(--muted)">On rejoue l'histoire dans l'ordre du temps (walk-forward : on n'entraîne que sur le passé) et on mesure trois choses : la qualité de classement (<strong>RPS</strong>, plus bas = mieux), la <strong>calibration</strong> (quand on dit X %, est-ce que ça arrive X %&nbsp;?) et la comparaison au <strong>bookmaker</strong>. Verdict sans détour : le modèle est <strong>très bien calibré</strong> mais <strong>ne bat pas encore le bookmaker</strong> sur les clubs.</p>
+    </div>`;
+
+  const clubPanel =
+    `<div class="panel">
+      <h3 class="block-title">Clubs — 5 grands championnats</h3>
+      <div class="metrics">
+        <div class="metric"><span class="m-label">Prédictions hors échantillon</span><span class="m-value">${intFmt(club.n_predictions)}</span></div>
+        <div class="metric"><span class="m-label">RPS modèle <span class="info" tabindex="0" role="note" aria-label="Ranked Probability Score : qualité des probabilités 1/X/2. Plus bas = mieux.">i</span></span><span class="m-value">${f3(club.rps_calibrated)}</span></div>
+        <div class="metric"><span class="m-label">RPS bookmaker (à battre)</span><span class="m-value">${f3(club.rps_bookmaker)}</span></div>
+        <div class="metric"><span class="m-label">Écart au bookmaker</span><span class="m-value" style="color:var(--red)">${gapBook == null ? "—" : "+" + f3(gapBook)}</span></div>
+      </div>
+      <div class="value-verdict" style="margin-top:16px">
+        <span class="badge no">Value betting : ROI ${vb.roi == null ? "—" : (vb.roi >= 0 ? "+" : "") + (vb.roi * 100).toFixed(1) + "%"}</span>
+        <span>${intFmt(vb.n_bets)} paris simulés (edge &gt; 5 %), profit ${vb.profit == null ? "—" : vb.profit.toFixed(0) + " u."}</span>
+      </div>
+      <p class="track-note">Le bookmaker reste devant (RPS plus bas) et la stratégie de paris à la valeur <strong>perd de l'argent</strong> sur l'historique. C'est le résultat honnête attendu : les cotes des grands championnats sont très efficientes.</p>
+      <h4 class="track-sub">Calibration des probabilités</h4>
+      ${calibrationTable(club.calibration)}
+    </div>`;
+
+  const intlPanel =
+    `<div class="panel">
+      <h3 class="block-title">Sélections — internationaux & Coupe du Monde</h3>
+      <div class="metrics">
+        <div class="metric"><span class="m-label">Prédictions hors échantillon</span><span class="m-value">${intFmt(intl.n_predictions)}</span></div>
+        <div class="metric"><span class="m-label">RPS modèle</span><span class="m-value">${f3(intl.rps_calibrated)}</span></div>
+        <div class="metric"><span class="m-label">RPS bookmaker</span><span class="m-value">indispo.</span></div>
+        <div class="metric"><span class="m-label">Log-loss</span><span class="m-value">${f3(intl.logloss_calibrated)}</span></div>
+      </div>
+      <p class="track-note">Modèle solide et bien calibré, mais <strong>non comparable au marché</strong> faute de cotes internationales dans nos sources. RPS plus bas qu'en club car les matchs de sélection sont souvent plus déséquilibrés (donc plus faciles à classer).</p>
+      <h4 class="track-sub">Calibration des probabilités</h4>
+      ${calibrationTable(intl.calibration)}
+    </div>`;
+
+  return intro + clubPanel + intlPanel +
+    `<p class="track-note" style="text-align:center">Reproductible : <code>python -m pipeline.backtest</code>. Les probabilités sont des estimations, pas des certitudes.</p>`;
+}
+
+async function loadTrackRecord(force) {
+  if (TRACK_LOADED && !force) return;
+  const host = $("trackBody");
+  host.innerHTML = '<p style="color:var(--muted)">Chargement…</p>';
+  try {
+    const data = await api("/api/track-record");
+    if (!data.available) {
+      host.innerHTML = '<p style="color:var(--muted)">Backtest non disponible. Lance <code>python -m pipeline.backtest</code> pour générer les chiffres.</p>';
+      return;
+    }
+    TRACK_LOADED = true;
+    host.innerHTML = renderTrackRecord(data);
+  } catch (e) {
+    host.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`;
+  }
+}
+
 /* ---------------------------------------------------------- Coupe du Monde */
 async function loadFixtures() {
   try {
@@ -370,20 +600,11 @@ async function loadFixtures() {
     $("fixtures").innerHTML = fx.slice(0, 40).map((m) => {
       const d = (m.date || "").slice(0, 10);
       return `<div class="fx"><span class="date">${d}</span>
-        <span class="teams">${m.home} <span style="color:var(--faint)">vs</span> ${m.away}</span>
-        <button data-c="${m.competition}" data-h="${m.home_team_id}" data-a="${m.away_team_id}">Analyser</button></div>`;
+        <span class="teams">${badgeHTML(m.home_badge)}${esc(m.home)} <span style="color:var(--faint)">vs</span> ${badgeHTML(m.away_badge)}${esc(m.away)}</span>
+        <button data-c="${esc(m.competition)}" data-h="${m.home_team_id}" data-a="${m.away_team_id}">Analyser</button></div>`;
     }).join("");
-    $("fixtures").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
-      switchView("predict");
-      const c = b.dataset.c;
-      if ([...$("competition").options].some((o) => o.value === c)) $("competition").value = c;
-      loadTeams().then(() => {
-        $("home").value = b.dataset.h; $("away").value = b.dataset.a;
-        $("neutral").checked = true; $("advToggle").checked = true; $("advanced").hidden = false;
-        $("predictForm").requestSubmit();
-        window.scrollTo({ top: 0, behavior: "smooth" });
-      });
-    }));
+    $("fixtures").querySelectorAll("button").forEach((b) => b.addEventListener("click",
+      () => analyzeMatch(b.dataset.c, b.dataset.h, b.dataset.a, true)));
   } catch (e) {
     $("fixtures").innerHTML = `<p style="color:var(--red)">${e.message}</p>`;
   }
@@ -398,7 +619,7 @@ async function runSimulation() {
     const teams = (r.teams || []).slice().sort((a, b) => (b.p_title || 0) - (a.p_title || 0)).slice(0, 16);
     const max = Math.max.apply(null, teams.map((t) => t.p_title || 0)) || 1;
     $("simResult").innerHTML = teams.map((t) =>
-      `<div class="sim-row"><span class="name">${t.team}</span>
+      `<div class="sim-row"><span class="name">${badgeHTML(t.badge)}${esc(t.team)}</span>
        <div class="sim-track"><div class="sim-fill" style="width:${Math.round((t.p_title / max) * 100)}%"></div></div>
        <span class="pct">${pct(t.p_title)}</span></div>`).join("");
     $("simStatus").textContent = `${r.n_sims} simulations · probabilité de titre`;
@@ -454,3 +675,10 @@ async function pollRefresh() {
 }
 
 init();
+
+/* PWA : enregistrement discret du service worker (échec silencieux si non supporté). */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => { /* pas de PWA, pas grave */ });
+  });
+}

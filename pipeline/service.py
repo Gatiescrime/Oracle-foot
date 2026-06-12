@@ -12,12 +12,15 @@ Le service charge paresseusement, depuis data/models/, les artefacts entraînés
 from __future__ import annotations
 
 import functools
+import math
 
 import pandas as pd
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from . import config, db, features, odds_api, scorers, staking
+from . import badges, config, db, features
+from . import names as names_mod
+from . import odds_api, scorers, staking
 from .qualitative import QualitativeLayer
 from .train import load_predictor
 
@@ -64,6 +67,32 @@ def _resolve(domain: str, name: str) -> str | None:
     return inv.get(name)
 
 
+def _resolve_fuzzy(domain: str, name: str, min_score: float = 0.6) -> str | None:
+    """Résout un libellé (souvent issu d'un bookmaker) vers un team_id.
+
+    Essaie d'abord la résolution exacte, puis les alias the-odds-api, puis un
+    appariement flou sur les noms canoniques. None si rien d'assez fiable
+    (on préfère ignorer un match plutôt que d'afficher une mauvaise équipe).
+    """
+    if not name:
+        return None
+    exact = _resolve(domain, name)
+    if exact:
+        return exact
+    override = odds_api.TEAM_OVERRIDES.get(names_mod._norm(name))
+    if override:
+        exact = _resolve(domain, override)
+        if exact:
+            return exact
+        name = override
+    best_id, best_score = None, 0.0
+    for tid, nm in _team_names(domain).items():
+        s = names_mod._similarity(name, nm)
+        if s > best_score:
+            best_id, best_score = tid, s
+    return best_id if best_score >= min_score else None
+
+
 def list_teams(domain: str | None = None) -> list[dict]:
     domains = [domain] if domain else [config.DOMAIN_CLUB, config.DOMAIN_INTL]
     out = []
@@ -73,8 +102,70 @@ def list_teams(domain: str | None = None) -> list[dict]:
         for tid, nm in sorted(names.items(), key=lambda kv: kv[1]):
             if tid in snap:      # uniquement les équipes avec un historique
                 out.append({"id": tid, "name": nm, "domain": d,
-                            "elo": round(snap[tid]["elo"], 1)})
+                            "elo": round(snap[tid]["elo"], 1),
+                            "badge": badges.badge(nm, d)})
     return out
+
+
+def _num(x):
+    """Float exploitable, ou None (filtre NaN/None) pour les explications."""
+    if x is None:
+        return None
+    try:
+        f = float(x)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(f) else f
+
+
+def _explain(feat: dict, home: str, away: str, neutral: bool) -> dict:
+    """Explication factuelle des facteurs dominants, à partir des SEULES features
+    déjà utilisées par le modèle (pré-match, sans aucune fuite).
+
+    Renvoie une synthèse en une phrase + 2-3 facteurs en langage simple. Aucune
+    nouvelle donnée n'est calculée : on traduit ce que le modèle voit déjà.
+    """
+    factors: list[str] = []
+
+    # 1. Force globale (Elo) — le moteur principal du modèle.
+    diff = _num(feat.get("elo_diff"))
+    if diff is not None:
+        ad = round(abs(diff))
+        if ad < 20:
+            factors.append(f"Forces très proches au classement Elo (écart de {ad} pts).")
+        else:
+            strong = home if diff > 0 else away
+            level = ("nettement" if ad >= 150 else
+                     "sensiblement" if ad >= 60 else "légèrement")
+            factors.append(f"Au classement Elo, {strong} est {level} devant "
+                           f"(écart de {ad} pts).")
+
+    # 2. Forme récente (5 derniers matchs, en points par match).
+    hppg, appg = _num(feat.get("home_form5_ppg")), _num(feat.get("away_form5_ppg"))
+    if hppg is not None and appg is not None:
+        if abs(hppg - appg) < 0.3:
+            factors.append(f"Forme récente comparable ({hppg:.1f} contre {appg:.1f} "
+                           f"pt/match sur 5 matchs).")
+        else:
+            inform = home if hppg > appg else away
+            factors.append(f"Meilleure forme récente pour {inform} "
+                           f"({max(hppg, appg):.1f} contre {min(hppg, appg):.1f} "
+                           f"pt/match sur 5 matchs).")
+
+    # 3. Avantage du terrain.
+    if neutral:
+        factors.append("Terrain neutre : pas d'avantage du domicile.")
+    elif _num(feat.get("home_advantage")):
+        factors.append(f"{home} profite de l'avantage de jouer à domicile.")
+
+    # Synthèse : qui le modèle voit devant, et pourquoi en premier lieu.
+    if diff is None or abs(diff) < 20:
+        summary = "Sur le papier, les deux équipes sont au coude-à-coude."
+    else:
+        strong = home if diff > 0 else away
+        summary = f"Le modèle penche pour {strong}, d'abord sur la force globale (Elo)."
+
+    return {"summary": summary, "factors": factors}
 
 
 def predict(competition: str, home: str, away: str, neutral: bool = False,
@@ -105,8 +196,11 @@ def predict(competition: str, home: str, away: str, neutral: bool = False,
                                       adjustment=adjustment)
     pred["home"] = home_name
     pred["away"] = away_name
+    pred["home_badge"] = badges.badge(home_name, domain)
+    pred["away_badge"] = badges.badge(away_name, domain)
     pred["competition"] = competition
     pred["domain"] = domain
+    pred["why"] = _explain(feat, home_name, away_name, neutral)
     # État EFFECTIF de la couche pour cette requête (l'UI affiche le bon panneau).
     effective = (_qualitative.enabled if use_qualitative is None
                  else bool(use_qualitative))
@@ -438,6 +532,249 @@ def predict_scorers(competition: str, home: str, away: str, neutral: bool = Fals
     }
 
 
+def app_meta() -> dict:
+    """Métadonnées légères pour l'en-tête : date de dernière mise à jour réussie.
+
+    `last_updated` = horodatage du dernier refresh réussi (table app_meta). En repli
+    (jamais rafraîchi sur cette machine), on expose la date du dernier match en base,
+    qui reflète aussi la fraîcheur des données livrées.
+    """
+    from . import refresh_job  # import tardif : refresh_job importe déjà service.
+    conn = db.connect()
+    try:
+        row = conn.execute("SELECT MAX(date) FROM matches").fetchone()
+        latest = row[0] if row else None
+    except Exception:
+        latest = None
+    finally:
+        conn.close()
+    return {"last_updated": refresh_job.last_updated(), "latest_match_date": latest}
+
+
+# ---------------------------------------------------------------------------
+# Étape 3 : affiches des prochains jours, toutes compétitions couvertes.
+# ---------------------------------------------------------------------------
+# Cache process (préserve le quota the-odds-api : une clé a un quota mensuel).
+_UPCOMING_CACHE: dict = {"at": 0.0, "days": None, "data": None}
+
+
+def _parse_dt(value) -> datetime | None:
+    """Parse une date ISO (avec ou sans heure / 'Z') en datetime UTC. None sinon."""
+    if not value:
+        return None
+    s = str(value).strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        try:
+            dt = datetime.strptime(s[:10], "%Y-%m-%d")
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _fixtures_in_window(now: datetime, horizon: datetime) -> list[dict]:
+    """Repli sans clé : affiches de la table `fixtures` dans la fenêtre demandée."""
+    conn = db.connect()
+    try:
+        df = pd.read_sql_query(
+            """SELECT f.date, f.competition, f.neutral,
+                      th.canonical_name AS home, ta.canonical_name AS away,
+                      f.home_team_id, f.away_team_id
+                 FROM fixtures f
+                 JOIN teams th ON th.team_id = f.home_team_id
+                 JOIN teams ta ON ta.team_id = f.away_team_id
+                ORDER BY f.date""", conn)
+    finally:
+        conn.close()
+    out = []
+    for r in df.to_dict(orient="records"):
+        d = _parse_dt(r["date"])
+        if d is None or d.date() < now.date() or d.date() > horizon.date():
+            continue
+        domain = domain_of(r["competition"])
+        out.append({
+            "commence_time": None,
+            "date": d.date().isoformat(),
+            "competition": r["competition"], "domain": domain,
+            "home_team_id": r["home_team_id"], "away_team_id": r["away_team_id"],
+            "home": r["home"], "away": r["away"],
+            "home_badge": badges.badge(r["home"], domain),
+            "away_badge": badges.badge(r["away"], domain),
+            "neutral": bool(r["neutral"]),
+            "has_odds": False,
+        })
+    return out
+
+
+def upcoming_matches(days: int = 7) -> dict:
+    """Affiches à venir des prochains jours, toutes compétitions couvertes.
+
+    Source live = the-odds-api (événements + meilleures cotes captées). Repli propre
+    = table `fixtures` (sans cotes). Résultat mis en cache au niveau process
+    (TTL = ODDS_API_TTL_HOURS) pour préserver le quota d'appels.
+    """
+    import time
+
+    days = max(1, min(30, int(days)))
+    now_ts = time.time()
+    ttl = float(config.ODDS_API_TTL_HOURS) * 3600.0
+    c = _UPCOMING_CACHE
+    if c["data"] is not None and c["days"] == days and now_ts - c["at"] < ttl:
+        return c["data"]
+
+    now = datetime.now(timezone.utc)
+    horizon = now + timedelta(days=days)
+    matches: list[dict] = []
+    source = "none"
+
+    if odds_api.configured():
+        source = "the-odds-api"
+        seen: set[tuple] = set()
+        for competition, sport_key in odds_api.SPORT_KEYS.items():
+            domain = domain_of(competition)
+            for ev in odds_api.fetch_odds(sport_key):
+                ct = _parse_dt(ev.get("commence_time"))
+                if ct is None or ct < now or ct > horizon:
+                    continue
+                hid = _resolve_fuzzy(domain, (ev.get("home_team") or "").strip())
+                aid = _resolve_fuzzy(domain, (ev.get("away_team") or "").strip())
+                if hid is None or aid is None or hid == aid:
+                    continue
+                key = (competition, hid, aid, ct.date().isoformat())
+                if key in seen:
+                    continue
+                seen.add(key)
+                tn = _team_names(domain)
+                home_name, away_name = tn.get(hid, hid), tn.get(aid, aid)
+                best = odds_api.best_prices(ev)
+                matches.append({
+                    "commence_time": ev.get("commence_time"),
+                    "date": ct.date().isoformat(),
+                    "competition": competition, "domain": domain,
+                    "home_team_id": hid, "away_team_id": aid,
+                    "home": home_name, "away": away_name,
+                    "home_badge": badges.badge(home_name, domain),
+                    "away_badge": badges.badge(away_name, domain),
+                    "neutral": False,
+                    "has_odds": bool(best.get("h2h")),
+                })
+
+    if not matches:
+        fb = _fixtures_in_window(now, horizon)
+        if fb:
+            matches, source = fb, "fixtures"
+
+    matches.sort(key=lambda m: (m.get("commence_time") or m.get("date") or "",
+                                m.get("competition") or ""))
+    result = {"days": days, "source": source,
+              "configured": odds_api.configured(),
+              "count": len(matches), "matches": matches}
+    c.update({"at": now_ts, "days": days, "data": result})
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Étape 4 : « Meilleure value du jour » — le meilleur edge parmi les affiches.
+# ---------------------------------------------------------------------------
+_VALUE_CACHE: dict = {"at": 0.0, "days": None, "data": None}
+
+# Garde-fous d'honnêteté : c'est sur les outsiders extrêmes que le modèle est le moins
+# fiable (biais favori/outsider, value betting négatif au backtest). Un mini-écart de
+# proba y fabrique un edge gigantesque mais illusoire. On ignore donc les issues trop
+# improbables et les cotes de pur loto pour ne remonter que des value crédibles.
+_VALUE_MIN_MODEL_PROB = 0.12
+_VALUE_MAX_ODDS = 8.0
+
+
+def best_value_today(days: int = 3, top_n: int = 3, max_scan: int = 60) -> dict:
+    """Balaye les affiches à venir (avec cotes live) et remonte les meilleures value.
+
+    Pour chaque match couvert par the-odds-api, on réutilise exactement
+    `live_odds` (proba du modèle × meilleure cote → edge), puis on garde les issues
+    dont l'edge dépasse le seuil. On les classe par edge décroissant et on renvoie
+    le top N. Résultat mis en cache (même TTL que les cotes : quota préservé).
+
+    Honnêteté : une « value » signale un prix favorable selon le modèle, **jamais**
+    une garantie de gain. Rien n'est remonté si aucune value n'est trouvée.
+    """
+    import time
+
+    days = max(1, min(14, int(days)))
+    top_n = max(1, min(10, int(top_n)))
+    now_ts = time.time()
+    ttl = float(config.ODDS_API_TTL_HOURS) * 3600.0
+    c = _VALUE_CACHE
+    if c["data"] is not None and c["days"] == days and now_ts - c["at"] < ttl:
+        return c["data"]
+
+    up = upcoming_matches(days)
+    candidates: list[dict] = []
+    scanned = 0
+    for m in up["matches"]:
+        if not m.get("has_odds") or scanned >= max_scan:
+            continue
+        scanned += 1
+        try:
+            od = live_odds(m["competition"], m["home"], m["away"],
+                           neutral=m.get("neutral", False))
+        except Exception:  # noqa: BLE001
+            continue
+        if od.get("source") != "the-odds-api":
+            continue
+        for r in od.get("markets", []):
+            p = r.get("model_prob")
+            if (r.get("value") and r.get("edge") is not None and p is not None
+                    and p >= _VALUE_MIN_MODEL_PROB
+                    and r.get("best_odds", 99) <= _VALUE_MAX_ODDS):
+                candidates.append({
+                    "competition": m["competition"], "domain": m["domain"],
+                    "home": m["home"], "away": m["away"],
+                    "home_team_id": m["home_team_id"], "away_team_id": m["away_team_id"],
+                    "home_badge": m["home_badge"], "away_badge": m["away_badge"],
+                    "date": m["date"], "commence_time": m["commence_time"],
+                    "neutral": bool(m.get("neutral", False)),
+                    "selection": r["selection"], "label": r["label"],
+                    "best_odds": r["best_odds"], "book": r["book"],
+                    "model_prob": r["model_prob"], "edge": r["edge"],
+                })
+    candidates.sort(key=lambda x: x["edge"], reverse=True)
+    result = {
+        "configured": odds_api.configured(),
+        "edge_threshold": config.BET_EDGE_THRESHOLD,
+        "scanned": scanned, "n_value": len(candidates),
+        "items": candidates[:top_n],
+    }
+    c.update({"at": now_ts, "days": days, "data": result})
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Étape 6 : « Track record » — performances réelles issues du backtest honnête.
+# ---------------------------------------------------------------------------
+def track_record() -> dict:
+    """Métriques de performance RÉELLES du backtest walk-forward (jamais inventées).
+
+    Lit `data/backtest_result.json` (produit par `python -m pipeline.backtest`) :
+    RPS modèle vs bookmaker, ROI du value betting, courbe de calibration. Renvoie
+    `available=False` proprement si l'artefact n'a pas encore été généré.
+    """
+    import json
+    import os
+
+    path = os.path.join(config.ROOT, "data", "backtest_result.json")
+    if not os.path.exists(path):
+        return {"available": False}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {"available": False}
+    return {"available": True, **data}
+
+
 def qualitative_status() -> dict:
     """État de la couche actu pour l'UI : défaut, compteur du jour, garde-fous coût."""
     return {
@@ -455,3 +792,5 @@ def clear_caches() -> None:
     _snapshot.cache_clear()
     _team_names.cache_clear()
     _players_index.cache_clear()
+    _UPCOMING_CACHE.update({"at": 0.0, "days": None, "data": None})
+    _VALUE_CACHE.update({"at": 0.0, "days": None, "data": None})

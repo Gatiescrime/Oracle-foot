@@ -1,0 +1,20 @@
+{
+  "name": "Oracle Foot — prédictions et paris",
+  "short_name": "Oracle Foot",
+  "description": "Probabilités de matchs de football calibrées et recommandations de paris : clubs et Coupe du Monde 2026.",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#070b16",
+  "theme_color": "#070b16",
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

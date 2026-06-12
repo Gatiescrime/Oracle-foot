@@ -82,6 +82,178 @@ def test_predict_with_qualitative_toggle(monkeypatch):
     assert off["qualitative_enabled"] is False and "qualitative" not in off
 
 
+def test_upcoming_with_odds_source(monkeypatch):
+    """Avec clé : /api/upcoming agrège les événements the-odds-api dans la fenêtre."""
+    from datetime import datetime, timedelta, timezone
+
+    from pipeline import service
+
+    teams = service.list_teams("club")
+    assert len(teams) >= 2
+    home, away = teams[0]["name"], teams[1]["name"]
+
+    ct = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    fake_event = {
+        "id": "evt-test-1",
+        "home_team": home, "away_team": away, "commence_time": ct,
+        "bookmakers": [{
+            "key": "b1", "title": "BookOne",
+            "markets": [{"key": "h2h", "outcomes": [
+                {"name": home, "price": 2.0},
+                {"name": "Draw", "price": 3.3},
+                {"name": away, "price": 3.6},
+            ]}],
+        }],
+    }
+    # PL est le premier sport_key ; on ne renvoie l'événement que pour celui-là.
+    pl_key = service.odds_api.SPORT_KEYS["Premier League"]
+    monkeypatch.setattr(service.odds_api, "configured", lambda: True)
+    monkeypatch.setattr(service.odds_api, "fetch_odds",
+                        lambda sk, **kw: [fake_event] if sk == pl_key else [])
+    service.clear_caches()  # vide le cache process des matchs à venir
+
+    res = service.upcoming_matches(days=7)
+    assert res["source"] == "the-odds-api"
+    assert res["count"] >= 1
+    m = res["matches"][0]
+    assert m["home"] == home and m["away"] == away
+    assert m["competition"] == "Premier League"
+    assert m["has_odds"] is True
+    assert "home_badge" in m and "away_badge" in m
+    service.clear_caches()
+
+
+def test_upcoming_fallback_to_fixtures(monkeypatch):
+    """Sans clé : repli propre sur la table fixtures (sans cotes)."""
+    from fastapi.testclient import TestClient
+
+    from pipeline import service
+    from pipeline.api import app
+
+    monkeypatch.setattr(service.odds_api, "configured", lambda: False)
+    service.clear_caches()
+
+    c = TestClient(app)
+    data = c.get("/api/upcoming?days=30").json()
+    assert data["configured"] is False
+    # la base de test contient des fixtures de Coupe du Monde 2026
+    assert data["source"] in ("fixtures", "none")
+    if data["count"]:
+        assert data["source"] == "fixtures"
+        m = data["matches"][0]
+        assert m["has_odds"] is False
+        assert "home_badge" in m
+    service.clear_caches()
+
+
+def test_track_record_endpoint_real_numbers():
+    """Le track record expose les vrais chiffres du backtest (jamais inventés)."""
+    from fastapi.testclient import TestClient
+
+    from pipeline.api import app
+    data = TestClient(app).get("/api/track-record").json()
+    assert "available" in data
+    if data["available"]:
+        club = data["club"]
+        assert club["n_predictions"] > 0
+        assert 0 < club["rps_calibrated"] < 1
+        assert 0 < club["rps_bookmaker"] < 1
+        assert "value_betting" in club and "roi" in club["value_betting"]
+        assert isinstance(club["calibration"], list) and club["calibration"]
+        assert data["international"]["n_predictions"] > 0
+
+
+def test_predict_includes_factual_why():
+    """La prédiction porte une explication factuelle (synthèse + facteurs) sans fuite."""
+    from pipeline import service
+    p = service.predict("Premier League", "Man City", "Liverpool", neutral=False)
+    why = p["why"]
+    assert isinstance(why["summary"], str) and why["summary"]
+    assert isinstance(why["factors"], list) and len(why["factors"]) >= 2
+    # l'avantage du terrain est mentionné hors terrain neutre
+    assert any("domicile" in f for f in why["factors"])
+
+    pn = service.predict("FIFA World Cup", "France", "Brazil", neutral=True)
+    assert any("neutre" in f for f in pn["why"]["factors"])
+
+
+def test_best_value_today_surfaces_positive_edge(monkeypatch):
+    """Une cote volontairement gonflée crée une value que l'encart doit remonter."""
+    from datetime import datetime, timedelta, timezone
+
+    from pipeline import service
+
+    teams = service.list_teams("club")
+    home, away = teams[0]["name"], teams[1]["name"]
+    ct = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+
+    # Cotes hautes mais crédibles (<= plafond anti-loto) sur les trois issues :
+    # l'issue la plus probable du modèle (p >= 1/3) dégage un edge bien au-dessus du
+    # seuil (p * 8 - 1), value garantie sans tomber dans l'outsider extrême filtré.
+    fake_event = {
+        "id": "evt-value-1",
+        "home_team": home, "away_team": away, "commence_time": ct,
+        "bookmakers": [{
+            "key": "b1", "title": "BookOne",
+            "markets": [{"key": "h2h", "outcomes": [
+                {"name": home, "price": 8.0},
+                {"name": "Draw", "price": 8.0},
+                {"name": away, "price": 8.0},
+            ]}],
+        }],
+    }
+    pl_key = service.odds_api.SPORT_KEYS["Premier League"]
+    monkeypatch.setattr(service.odds_api, "configured", lambda: True)
+    monkeypatch.setattr(service.odds_api, "fetch_odds",
+                        lambda sk, **kw: [fake_event] if sk == pl_key else [])
+    service.clear_caches()
+
+    res = service.best_value_today(days=3, top_n=3)
+    assert res["configured"] is True
+    assert res["n_value"] >= 1
+    top = res["items"][0]
+    assert top["edge"] > res["edge_threshold"]
+    assert top["home"] == home and top["away"] == away
+    assert "home_badge" in top and top["best_odds"] == 8.0
+    assert top["model_prob"] >= 0.12
+    service.clear_caches()
+
+
+def test_value_today_empty_without_key(monkeypatch):
+    """Sans clé : aucune value remontée (liste vide, pas d'erreur)."""
+    from fastapi.testclient import TestClient
+
+    from pipeline import service
+    from pipeline.api import app
+
+    monkeypatch.setattr(service.odds_api, "configured", lambda: False)
+    service.clear_caches()
+    data = TestClient(app).get("/api/value/today").json()
+    assert data["items"] == [] and data["n_value"] == 0
+    service.clear_caches()
+
+
+def test_pwa_assets_served():
+    """Manifest + service worker servis à la racine, avec les bons en-têtes."""
+    from fastapi.testclient import TestClient
+
+    from pipeline.api import app
+    c = TestClient(app)
+
+    m = c.get("/manifest.json")
+    assert m.status_code == 200
+    body = m.json()
+    assert body["name"] and body["display"] == "standalone"
+    assert body["icons"] and body["icons"][0]["src"].endswith(".svg")
+
+    sw = c.get("/sw.js")
+    assert sw.status_code == 200
+    assert sw.headers.get("service-worker-allowed") == "/"
+    assert "addEventListener" in sw.text
+    # le SW ne doit jamais mettre en cache les appels /api/
+    assert "/api/" in sw.text
+
+
 def test_qualitative_status_endpoint():
     from fastapi.testclient import TestClient
 

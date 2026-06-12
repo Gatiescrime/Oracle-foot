@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, db, refresh_job, service, simulate
+from . import badges, config, db, refresh_job, service, simulate
 
 app = FastAPI(title="Prédiction Foot", version="1.0")
 
@@ -166,7 +166,10 @@ def simulate_wc(n_sims: int = 2000) -> dict:
     res = _cached_simulation(n_sims)
     if "error" in res:
         raise HTTPException(503, res["error"])
-    return res
+    # Écussons (sélections → drapeaux) sans muter le résultat mis en cache.
+    teams = [{**t, "badge": badges.badge(t.get("team"), config.DOMAIN_INTL)}
+             for t in res.get("teams", [])]
+    return {**res, "teams": teams}
 
 
 @app.post("/api/refresh")
@@ -188,6 +191,42 @@ def refresh_status() -> dict:
     return refresh_job.status()
 
 
+@app.get("/api/meta")
+def meta() -> dict:
+    """Métadonnées légères pour l'en-tête (date de dernière mise à jour des données)."""
+    return service.app_meta()
+
+
+@app.get("/api/upcoming")
+def upcoming(days: int = 7) -> dict:
+    """Affiches à venir (toutes compétitions couvertes) des `days` prochains jours.
+
+    Source live the-odds-api si une clé est configurée (avec meilleures cotes),
+    sinon repli propre sur la table `fixtures`. Résultat mis en cache (quota).
+    """
+    return service.upcoming_matches(days)
+
+
+@app.get("/api/track-record")
+def track_record() -> dict:
+    """Performances réelles du backtest walk-forward (RPS, calibration, ROI value).
+
+    Données issues de `data/backtest_result.json` : jamais inventées, honnêtes sur
+    le fait que le modèle ne bat pas encore le bookmaker sur les clubs.
+    """
+    return service.track_record()
+
+
+@app.get("/api/value/today")
+def value_today(days: int = 3, top_n: int = 3) -> dict:
+    """Meilleures value parmi les affiches à venir (edge modèle vs meilleure cote).
+
+    Réutilise le comparateur de cotes live. Une value n'est jamais une garantie de
+    gain. Renvoie une liste vide si aucune opportunité n'est trouvée.
+    """
+    return service.best_value_today(days, top_n)
+
+
 @app.get("/api/fixtures")
 def fixtures() -> dict:
     conn = db.connect()
@@ -200,13 +239,33 @@ def fixtures() -> dict:
            JOIN teams ta ON ta.team_id = f.away_team_id
            ORDER BY f.date""", conn)
     conn.close()
-    return {"fixtures": df.to_dict(orient="records")}
+    rows = df.to_dict(orient="records")
+    for r in rows:
+        domain = service.domain_of(r["competition"])
+        r["home_badge"] = badges.badge(r["home"], domain)
+        r["away_badge"] = badges.badge(r["away"], domain)
+    return {"fixtures": rows}
 
 
 # --- frontend statique -----------------------------------------------------
 @app.get("/")
 def index():
     return FileResponse(os.path.join(WEBAPP_DIR, "index.html"))
+
+
+@app.get("/manifest.json")
+def manifest():
+    """Manifest PWA (servi à la racine pour un scope d'installation global)."""
+    return FileResponse(os.path.join(WEBAPP_DIR, "manifest.json"),
+                        media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+def service_worker():
+    """Service worker servi à la racine (scope « / ») pour contrôler toute l'app."""
+    return FileResponse(
+        os.path.join(WEBAPP_DIR, "sw.js"), media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"})
 
 
 if os.path.isdir(WEBAPP_DIR):

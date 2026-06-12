@@ -102,3 +102,19 @@ def test_api_refresh_conflict_when_running(monkeypatch):
     c = TestClient(api.app)
     r = c.post("/api/refresh?mode=rapide")
     assert r.status_code == 409
+
+
+def test_app_meta_exposes_last_updated(monkeypatch):
+    """/api/meta renvoie l'horodatage persisté (Étape 2), avec repli latest_match_date."""
+    from fastapi.testclient import TestClient
+
+    from pipeline import api, service
+    refresh_job._persist_last_updated()           # écrit last_updated dans la base isolée
+    meta = service.app_meta()
+    assert meta["last_updated"] is not None        # correspond au refresh enregistré
+    assert "latest_match_date" in meta             # présent (None ici : base de test vide)
+
+    c = TestClient(api.app)
+    r = c.get("/api/meta")
+    assert r.status_code == 200
+    assert set(r.json()) == {"last_updated", "latest_match_date"}
