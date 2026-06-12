@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la data/)",
+      "Bash(python3 --version)",
+      "Bash(python --version)",
+      "Bash(python -c \"import sys; print\\(sys.version\\)\")",
+      "Bash(python -c 'import __TRACKED_VAR__; print\\('\\\\''__TRACKED_VAR__'\\\\'', getattr\\(__TRACKED_VAR__,'\\\\''__version__'\\\\'','\\\\''?'\\\\''\\)\\)')",
+      "Read(//opt/homebrew/bin/**)",
+      "Read(//usr/local/bin/**)",
+      "Read(//Users/gatien/.pyenv/**)",
+      "Bash(command -v python)",
+      "Bash(command -v python3)",
+      "Bash(/usr/local/bin/python3.14 -m pip list)",
+      "Bash(/Users/gatien/.local/bin/python3.12 -m pip list)",
+      "Bash(/usr/local/bin/python3.14 -c \"import pandas; print\\('pandas ok', pandas.__version__\\)\")",
+      "Read(//private/tmp/**)",
+      "Bash(/Users/gatien/.local/bin/python3.12 -m venv _t312)",
+      "Bash(_t312/bin/python -m pip --version)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} %{size_download}o\\\\n\" --max-time 25 \"https://understat.com/league/EPL/2023\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} %{size_download}o\\\\n\" --max-time 25 \"https://www.football-data.co.uk/mmz4281/2324/E0.csv\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} %{size_download}o\\\\n\" --max-time 25 \"http://api.clubelo.com/Arsenal\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} %{size_download}o\\\\n\" --max-time 25 \"https://raw.githubusercontent.com/martj42/international_results/master/results.csv\")"
+    ]
+  }
+}

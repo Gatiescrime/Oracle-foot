@@ -1,0 +1,151 @@
+{
+  "club": {
+    "domain": "club",
+    "n_predictions": 4454,
+    "rps_raw": 0.20023808969802426,
+    "rps_calibrated": 0.20074879579383859,
+    "logloss_raw": 0.9861957783477172,
+    "logloss_calibrated": 1.0045932908828914,
+    "calibration": [
+      {
+        "bin": "0.0-0.1",
+        "predit_moyen": 0.063,
+        "observe": 0.08,
+        "effectif": 687
+      },
+      {
+        "bin": "0.1-0.2",
+        "predit_moyen": 0.155,
+        "observe": 0.163,
+        "effectif": 1696
+      },
+      {
+        "bin": "0.2-0.3",
+        "predit_moyen": 0.263,
+        "observe": 0.263,
+        "effectif": 4778
+      },
+      {
+        "bin": "0.3-0.4",
+        "predit_moyen": 0.342,
+        "observe": 0.336,
+        "effectif": 2676
+      },
+      {
+        "bin": "0.4-0.5",
+        "predit_moyen": 0.438,
+        "observe": 0.44,
+        "effectif": 1278
+      },
+      {
+        "bin": "0.5-0.6",
+        "predit_moyen": 0.556,
+        "observe": 0.549,
+        "effectif": 1063
+      },
+      {
+        "bin": "0.6-0.7",
+        "predit_moyen": 0.636,
+        "observe": 0.64,
+        "effectif": 672
+      },
+      {
+        "bin": "0.7-0.8",
+        "predit_moyen": 0.742,
+        "observe": 0.748,
+        "effectif": 345
+      },
+      {
+        "bin": "0.8-0.9",
+        "predit_moyen": 0.852,
+        "observe": 0.816,
+        "effectif": 141
+      },
+      {
+        "bin": "0.9-1.0",
+        "predit_moyen": 0.926,
+        "observe": 0.769,
+        "effectif": 26
+      }
+    ],
+    "n_with_odds": 3601,
+    "rps_bookmaker": 0.19254184446645914,
+    "rps_model_on_odds_subset": 0.19917043970945025,
+    "value_betting": {
+      "n_bets": 3694,
+      "staked": 3694.0,
+      "profit": -281.99,
+      "roi": -0.0763
+    }
+  },
+  "international": {
+    "domain": "international",
+    "n_predictions": 24703,
+    "rps_raw": 0.18946286167004006,
+    "rps_calibrated": 0.1884054074789685,
+    "logloss_raw": 0.9400816418809547,
+    "logloss_calibrated": 0.9359463994058846,
+    "calibration": [
+      {
+        "bin": "0.0-0.1",
+        "predit_moyen": 0.048,
+        "observe": 0.063,
+        "effectif": 5821
+      },
+      {
+        "bin": "0.1-0.2",
+        "predit_moyen": 0.155,
+        "observe": 0.162,
+        "effectif": 12123
+      },
+      {
+        "bin": "0.2-0.3",
+        "predit_moyen": 0.254,
+        "observe": 0.252,
+        "effectif": 25286
+      },
+      {
+        "bin": "0.3-0.4",
+        "predit_moyen": 0.344,
+        "observe": 0.341,
+        "effectif": 8667
+      },
+      {
+        "bin": "0.4-0.5",
+        "predit_moyen": 0.444,
+        "observe": 0.45,
+        "effectif": 7445
+      },
+      {
+        "bin": "0.5-0.6",
+        "predit_moyen": 0.551,
+        "observe": 0.549,
+        "effectif": 6040
+      },
+      {
+        "bin": "0.6-0.7",
+        "predit_moyen": 0.647,
+        "observe": 0.648,
+        "effectif": 3796
+      },
+      {
+        "bin": "0.7-0.8",
+        "predit_moyen": 0.749,
+        "observe": 0.73,
+        "effectif": 2259
+      },
+      {
+        "bin": "0.8-0.9",
+        "predit_moyen": 0.835,
+        "observe": 0.795,
+        "effectif": 1559
+      },
+      {
+        "bin": "0.9-1.0",
+        "predit_moyen": 0.955,
+        "observe": 0.923,
+        "effectif": 1113
+      }
+    ]
+  }
+}

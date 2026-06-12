@@ -39,6 +39,10 @@ COPY pipeline/ ./pipeline/
 COPY webapp/ ./webapp/
 COPY data/football.db ./data/football.db
 COPY data/models/ ./data/models/
+# Résultat du backtest (alimente la page Track record) + données features livrées.
+COPY data/backtest_result.json ./data/backtest_result.json
+COPY data/squad_values.csv ./data/squad_values.csv
+COPY data/venues.csv ./data/venues.csv
 
 EXPOSE 8000
 
