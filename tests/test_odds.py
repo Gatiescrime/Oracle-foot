@@ -84,8 +84,34 @@ def test_find_event_returns_none_when_no_match():
     assert odds_api.find_event([], "Canada", "Bosnia") is None
 
 
-def test_team_override_usa():
-    assert odds_api.TEAM_OVERRIDES.get("usa") == "United States"
+def test_nation_alias_resolution():
+    from pipeline import names
+    # quelques pièges fréquents the-odds-api / FIFA -> nom canonique de notre base
+    assert names.resolve_alias("USA") == "United States"
+    assert names.resolve_alias("Korea Republic") == "South Korea"
+    assert names.resolve_alias("Czechia") == "Czech Republic"
+    assert names.resolve_alias("Côte d'Ivoire") == "Ivory Coast"
+    # clé d'alias identique des deux côtés (symétrique)
+    assert names.alias_key("USA") == names.alias_key("United States")
+    assert names.alias_key("Man City") == names.alias_key("Manchester City")
+
+
+def test_find_event_matches_via_nation_alias():
+    # l'API désigne les sélections autrement que notre base : doit quand même apparier
+    events = [{
+        "id": "wc1", "home_team": "USA", "away_team": "Korea Republic",
+        "commence_time": "2026-06-20T19:00:00Z",
+        "bookmakers": [{"key": "x", "title": "X", "markets": [
+            {"key": "h2h", "outcomes": [
+                {"name": "USA", "price": 1.7}, {"name": "Korea Republic", "price": 4.0},
+                {"name": "Draw", "price": 3.6}]}]}]}]
+    ev = odds_api.find_event(events, "United States", "South Korea")
+    assert ev is not None and ev["id"] == "wc1" and ev["_matched_score"] == 1.0
+    # ordre inversé : Czechia (API) <-> Czech Republic (nous)
+    events2 = [{"id": "wc2", "home_team": "Czechia", "away_team": "United States",
+                "bookmakers": []}]
+    ev2 = odds_api.find_event(events2, "United States", "Czech Republic")
+    assert ev2 is not None and ev2["_swapped"] is True
 
 
 # --- configuration / repli -------------------------------------------------

@@ -103,3 +103,33 @@ def test_badge_club_is_always_pill():
     assert b["kind"] == "initials"
     b2 = badges.badge("Real Madrid", config.DOMAIN_CLUB)
     assert b2["kind"] == "initials" and b2["text"] == "RM"
+
+
+# --- écussons de clubs (table figée + repli garanti) -------------------------
+def test_badge_club_with_crest_keeps_initials_fallback(monkeypatch):
+    # table d'écussons simulée : le club connu reçoit `crest` SANS perdre ses initiales.
+    monkeypatch.setattr(badges, "CLUB_CRESTS", {"Arsenal": "https://x/arsenal.png"})
+    b = badges.badge("Arsenal", config.DOMAIN_CLUB)
+    assert b["kind"] == "initials"               # repli toujours disponible
+    assert b["text"] == "AR" and re.fullmatch(r"#[0-9a-f]{6}", b["color"])
+    assert b["crest"] == "https://x/arsenal.png"  # image en plus
+
+
+def test_badge_club_without_crest_has_no_crest_key(monkeypatch):
+    monkeypatch.setattr(badges, "CLUB_CRESTS", {"Arsenal": "https://x/arsenal.png"})
+    b = badges.badge("Chelsea", config.DOMAIN_CLUB)
+    assert b["kind"] == "initials" and "crest" not in b
+
+
+def test_selection_never_gets_a_crest(monkeypatch):
+    # une sélection reconnue reste un drapeau (les écussons ne concernent que les clubs).
+    monkeypatch.setattr(badges, "CLUB_CRESTS", {"France": "https://x/france.png"})
+    b = badges.badge("France", config.DOMAIN_INTL)
+    assert b["kind"] == "flag" and "crest" not in b
+
+
+def test_crest_url_helper(monkeypatch):
+    monkeypatch.setattr(badges, "CLUB_CRESTS", {"Lyon": "https://x/lyon.png"})
+    assert badges.crest_url("Lyon") == "https://x/lyon.png"
+    assert badges.crest_url("Inconnu") is None
+    assert badges.crest_url(None) is None

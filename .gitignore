@@ -4,6 +4,11 @@
 claude_code_settings.json
 PROMPT_CLAUDE_CODE.md
 
+# SQLite — journaux/WAL transitoires (jamais versionnés)
+*.db-journal
+*.db-wal
+*.db-shm
+
 # Python
 __pycache__/
 *.pyc

@@ -22,6 +22,11 @@ import hashlib
 from . import config
 from .names import _norm
 
+try:  # table d'écussons de clubs figée hors ligne (peut être absente avant génération)
+    from .club_crests import CLUB_CRESTS
+except Exception:  # noqa: BLE001
+    CLUB_CRESTS: dict[str, str] = {}
+
 # --- sélections → code ISO 3166-1 alpha-2 (minuscule, compatible flagcdn) ---------------
 # Cas spéciaux : nations du Royaume-Uni via les sous-codes flagcdn.
 _INTL_ISO: dict[str, str] = {
@@ -173,15 +178,29 @@ def _hsl_to_hex(h: float, s: float, l: float) -> str:
     return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
 
 
+def crest_url(name: str | None) -> str | None:
+    """Écusson de club (URL d'image figée), sinon None. Aucun appel réseau."""
+    if not name:
+        return None
+    return CLUB_CRESTS.get(name)
+
+
 def badge(name: str | None, domain: str | None = None) -> dict:
     """Objet d'affichage pour une équipe : drapeau (sélection) ou pastille (sinon).
 
     - sélection reconnue → `{"kind":"flag","iso","emoji","label"}` ;
-    - tout le reste (club, sélection non mappée) → `{"kind":"initials","text","color","label"}`.
+    - club avec écusson connu → pastille d'initiales **+ `crest`** (l'UI affiche l'image
+      et retombe proprement sur les initiales si elle ne charge pas) ;
+    - tout le reste → `{"kind":"initials","text","color","label"}`.
+    Les initiales sont TOUJOURS fournies : aucun trou possible, même si l'image manque.
     """
     label = name or ""
     if domain != config.DOMAIN_CLUB:
         code = iso_code(name)
         if code:
             return {"kind": "flag", "iso": code, "emoji": flag_emoji(code), "label": label}
-    return {"kind": "initials", "text": initials(name), "color": color(name), "label": label}
+    out = {"kind": "initials", "text": initials(name), "color": color(name), "label": label}
+    crest = crest_url(name)
+    if crest:
+        out["crest"] = crest
+    return out

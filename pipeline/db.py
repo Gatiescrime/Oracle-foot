@@ -124,10 +124,22 @@ CREATE TABLE IF NOT EXISTS players (
     PRIMARY KEY (understat_id, season)
 );
 
+-- Buteurs des SÉLECTIONS : agrégat (équipe, joueur) des buts récents + dernier but.
+-- Pas de xG ni de minutes côté international (source martj42) : le taux d'un joueur
+-- vient de sa PART de buts récents. Estimation marquée « indicative » dans l'API.
+CREATE TABLE IF NOT EXISTS intl_scorers (
+    team_id     TEXT NOT NULL,
+    player_name TEXT NOT NULL,
+    goals       INTEGER NOT NULL,
+    last_date   TEXT,
+    PRIMARY KEY (team_id, player_name)
+);
+
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date);
 CREATE INDEX IF NOT EXISTS idx_matches_domain ON matches(domain);
 CREATE INDEX IF NOT EXISTS idx_matches_teams ON matches(home_team_id, away_team_id);
 CREATE INDEX IF NOT EXISTS idx_players_team ON players(team_id);
+CREATE INDEX IF NOT EXISTS idx_intl_scorers_team ON intl_scorers(team_id);
 """
 
 # Tables auxiliaires PERSISTANTES (jamais réinitialisées par reset_schema) :
@@ -158,6 +170,13 @@ CREATE TABLE IF NOT EXISTS odds_snapshots (
     book         TEXT,
     PRIMARY KEY (event_id, market, selection, captured_at)
 );
+CREATE TABLE IF NOT EXISTS intl_scorers (
+    team_id     TEXT NOT NULL,
+    player_name TEXT NOT NULL,
+    goals       INTEGER NOT NULL,
+    last_date   TEXT,
+    PRIMARY KEY (team_id, player_name)
+);
 """
 
 
@@ -177,7 +196,7 @@ def connect(path: str | None = None) -> sqlite3.Connection:
 
 def reset_schema(conn: sqlite3.Connection) -> None:
     """Reconstruit la base de zéro (refresh idempotent)."""
-    for t in ("ingest_log", "players", "fixtures", "matches", "team_aliases", "teams"):
+    for t in ("ingest_log", "intl_scorers", "players", "fixtures", "matches", "team_aliases", "teams"):
         conn.execute(f"DROP TABLE IF EXISTS {t}")
     conn.executescript(SCHEMA)
     conn.commit()

@@ -110,8 +110,8 @@ def _matrix_to_prediction(mat, home, away, neutral, lambdas):
     }
 
 
-def fit_dixon_coles(matches: pd.DataFrame, xi: float = 0.0018, reg: float = 0.05,
-                    min_matches: int = 8, max_iter: int = 500, verbose: bool = True,
+def fit_dixon_coles(matches: pd.DataFrame, xi: float = 0.0018, reg: float = 1.5,
+                    min_matches: int = 8, max_iter: int = 2000, verbose: bool = True,
                     ref_date=None) -> DixonColesModel:
     """Estime le modèle par maximum de vraisemblance pondéré + régularisé.
 
@@ -120,6 +120,17 @@ def fit_dixon_coles(matches: pd.DataFrame, xi: float = 0.0018, reg: float = 0.05
     reg     : force de la régularisation L2 sur attaque/défense.
     min_matches : une équipe doit avoir au moins ce nombre de matchs (pondérés ~)
                   pour être paramétrée ; sinon elle est « moyenne » (0).
+
+    CALIBRAGE (vérifié en backtest chronologique, voir
+    docs/amelioration_modele_intl.md) :
+    - `max_iter`=2000 donne à L-BFGS-B un budget d'évaluations suffisant pour
+      VRAIMENT converger (~370 paramètres en sélections, gradient numérique) :
+      l'ancien défaut (500) s'arrêtait sur la limite d'évaluations et renvoyait
+      un faux `converged=False`.
+    - `reg`=1.5 : la régularisation L2 plus ferme évite le surajustement qui,
+      sans elle, produisait des espérances de buts absurdes (France 8,2 buts
+      contre Gibraltar) ; le RPS international s'améliore (0,197→0,195) et celui
+      des clubs reste stable, tout en gardant la discrimination des équipes.
     """
     df = matches.dropna(subset=["home_goals", "away_goals"]).copy()
     hg = df["home_goals"].to_numpy(dtype=int)

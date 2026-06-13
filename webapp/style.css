@@ -205,6 +205,8 @@ option { background: #0c1322; }
 .team-badge.pill { display: inline-flex; align-items: center; justify-content: center;
   width: 20px; height: 20px; border-radius: 50%; background: var(--pill, #4a5673);
   color: #fff; font-size: 10px; font-weight: 700; line-height: 1; }
+.team-badge.crest { width: 22px; height: 22px; object-fit: contain;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35)); }
 
 /* metrics */
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }

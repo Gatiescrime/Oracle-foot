@@ -11,6 +11,7 @@ Le service charge paresseusement, depuis data/models/, les artefacts entraînés
 
 from __future__ import annotations
 
+import copy
 import functools
 import math
 
@@ -32,6 +33,15 @@ _qualitative = QualitativeLayer()
 
 def domain_of(competition: str) -> str:
     return config.DOMAIN_CLUB if competition in _CLUB_COMPETITIONS else config.DOMAIN_INTL
+
+
+# Cache des prédictions statistiques identiques (même match, mêmes options).
+# Déterministe tant que les modèles/snapshots ne changent pas : vidé par
+# `clear_caches()` après un refresh / ré-entraînement. On ne met EN cache que le
+# socle statistique (couche qualitative OFF) ; la couche qualitative, sensible au
+# temps et au réseau, garde son propre cache à TTL court.
+_PRED_CACHE: dict = {}
+_PRED_CACHE_MAX = 256
 
 
 @functools.lru_cache(maxsize=4)
@@ -79,15 +89,18 @@ def _resolve_fuzzy(domain: str, name: str, min_score: float = 0.6) -> str | None
     exact = _resolve(domain, name)
     if exact:
         return exact
-    override = odds_api.TEAM_OVERRIDES.get(names_mod._norm(name))
-    if override:
-        exact = _resolve(domain, override)
+    # alias connus (USA→United States, Czechia→Czech Republic, Man City…) : on tente
+    # d'abord une résolution exacte sur le nom canonique résolu.
+    resolved = names_mod.resolve_alias(name)
+    if resolved != name:
+        exact = _resolve(domain, resolved)
         if exact:
             return exact
-        name = override
+    # appariement flou, tolérant aux alias des DEUX côtés (clé d'alias identique → 1.0)
+    nk = names_mod.alias_key(name)
     best_id, best_score = None, 0.0
     for tid, nm in _team_names(domain).items():
-        s = names_mod._similarity(name, nm)
+        s = 1.0 if names_mod.alias_key(nm) == nk else names_mod._similarity(resolved, nm)
         if s > best_score:
             best_id, best_score = tid, s
     return best_id if best_score >= min_score else None
@@ -118,12 +131,48 @@ def _num(x):
     return None if math.isnan(f) else f
 
 
-def _explain(feat: dict, home: str, away: str, neutral: bool) -> dict:
+def _h2h_record(domain: str, hid: str, aid: str, limit: int = 8) -> dict | None:
+    """Bilan des dernières confrontations directes entre deux équipes.
+
+    Lecture seule de la base (matchs passés uniquement, aucune fuite : on n'utilise
+    que des résultats déjà joués pour *expliquer* la prédiction). Renvoie le bilan
+    du point de vue de `hid` (domicile demandé), ou None si aucune confrontation.
+    """
+    conn = db.connect()
+    try:
+        rows = conn.execute(
+            """SELECT home_team_id, away_team_id, home_goals, away_goals
+               FROM matches
+               WHERE ((home_team_id=? AND away_team_id=?)
+                   OR (home_team_id=? AND away_team_id=?))
+                 AND home_goals IS NOT NULL AND away_goals IS NOT NULL
+               ORDER BY date DESC LIMIT ?""",
+            (hid, aid, aid, hid, limit)).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return None
+    hw = d = aw = 0
+    for h, _a, hg, ag in rows:
+        gd = (hg - ag) if h == hid else (ag - hg)   # >0 si l'équipe `hid` gagne
+        if gd > 0:
+            hw += 1
+        elif gd < 0:
+            aw += 1
+        else:
+            d += 1
+    return {"n": len(rows), "home_wins": hw, "draws": d, "away_wins": aw}
+
+
+def _explain(feat: dict, home: str, away: str, neutral: bool,
+             h2h: dict | None = None) -> dict:
     """Explication factuelle des facteurs dominants, à partir des SEULES features
     déjà utilisées par le modèle (pré-match, sans aucune fuite).
 
-    Renvoie une synthèse en une phrase + 2-3 facteurs en langage simple. Aucune
-    nouvelle donnée n'est calculée : on traduit ce que le modèle voit déjà.
+    Renvoie une synthèse en une phrase + quelques facteurs en langage simple. On
+    traduit ce que le modèle voit déjà (Elo, forme, terrain) et on ajoute deux
+    repères factuels parlants : le bilan des confrontations directes (`h2h`) et un
+    éventuel écart de fraîcheur (jours de repos).
     """
     factors: list[str] = []
 
@@ -158,6 +207,24 @@ def _explain(feat: dict, home: str, away: str, neutral: bool) -> dict:
     elif _num(feat.get("home_advantage")):
         factors.append(f"{home} profite de l'avantage de jouer à domicile.")
 
+    # 4. Confrontations directes (historique réel des face-à-face).
+    if h2h and h2h.get("n"):
+        n, hw, dr, aw = h2h["n"], h2h["home_wins"], h2h["draws"], h2h["away_wins"]
+        if hw == aw:
+            factors.append(f"Confrontations directes équilibrées sur les {n} derniers "
+                           f"face-à-face ({hw} victoire(s) chacun, {dr} nul(s)).")
+        else:
+            lead, lead_w, opp_w = (home, hw, aw) if hw > aw else (away, aw, hw)
+            factors.append(f"Sur les {n} dernières confrontations directes, {lead} mène "
+                           f"({lead_w} victoire(s) à {opp_w}, {dr} nul(s)).")
+
+    # 5. Fraîcheur : écart de repos NOTABLE et plausible (hors longue coupure).
+    rh, ra = _num(feat.get("home_rest_days")), _num(feat.get("away_rest_days"))
+    if rh is not None and ra is not None and max(rh, ra) <= 21 and abs(rh - ra) >= 2:
+        fresher = home if rh > ra else away
+        factors.append(f"{fresher} a eu plus de repos avant le match "
+                       f"({int(max(rh, ra))} j contre {int(min(rh, ra))} j).")
+
     # Synthèse : qui le modèle voit devant, et pourquoi en premier lieu.
     if diff is None or abs(diff) < 20:
         summary = "Sur le papier, les deux équipes sont au coude-à-coude."
@@ -181,6 +248,15 @@ def predict(competition: str, home: str, away: str, neutral: bool = False,
     if hid not in snap or aid not in snap:
         raise ValueError("Équipe sans historique exploitable.")
 
+    # État effectif de la couche qualitative pour cette requête.
+    effective = (_qualitative.enabled if use_qualitative is None
+                 else bool(use_qualitative))
+    # Cache process : on sert une copie pour isoler l'appelant (évite qu'une
+    # mutation aval ne corrompe l'entrée). Uniquement pour le socle statistique.
+    cache_key = (domain, hid, aid, bool(neutral)) if not effective else None
+    if cache_key is not None and cache_key in _PRED_CACHE:
+        return copy.deepcopy(_PRED_CACHE[cache_key])
+
     feat = features.make_match_features(
         snap[hid], snap[aid], neutral, competition, is_club)
 
@@ -200,11 +276,15 @@ def predict(competition: str, home: str, away: str, neutral: bool = False,
     pred["away_badge"] = badges.badge(away_name, domain)
     pred["competition"] = competition
     pred["domain"] = domain
-    pred["why"] = _explain(feat, home_name, away_name, neutral)
+    pred["why"] = _explain(feat, home_name, away_name, neutral,
+                           h2h=_h2h_record(domain, hid, aid))
     # État EFFECTIF de la couche pour cette requête (l'UI affiche le bon panneau).
-    effective = (_qualitative.enabled if use_qualitative is None
-                 else bool(use_qualitative))
     pred["qualitative_enabled"] = effective
+
+    if cache_key is not None:
+        if len(_PRED_CACHE) >= _PRED_CACHE_MAX:
+            _PRED_CACHE.clear()         # purge simple : borne la mémoire
+        _PRED_CACHE[cache_key] = copy.deepcopy(pred)
     return pred
 
 
@@ -792,5 +872,6 @@ def clear_caches() -> None:
     _snapshot.cache_clear()
     _team_names.cache_clear()
     _players_index.cache_clear()
+    _PRED_CACHE.clear()
     _UPCOMING_CACHE.update({"at": 0.0, "days": None, "data": None})
     _VALUE_CACHE.update({"at": 0.0, "days": None, "data": None})

@@ -84,6 +84,20 @@ CACHE_TTL_HOURS = 12          # un fichier en cache plus récent que ça est ré
 HTTP_RETRIES = 3
 HTTP_TIMEOUT = 45
 
+# --- Mise à jour « rapide » (bouton UI) ------------------------------------
+# Le mode rapide ne re-télécharge QUE les sources légères (résultats football-data
+# et martj42) ; les sources lentes (xG/joueurs understat) sont réutilisées depuis
+# le cache disque tant qu'il est plus frais que ce TTL. But : réponse en quelques
+# secondes, jamais bloquée.
+QUICK_HEAVY_TTL_HOURS = float(os.environ.get("QUICK_HEAVY_TTL_HOURS", "24"))
+# Timeout réseau COURT par source en mode rapide (échec franc plutôt que blocage).
+QUICK_HTTP_TIMEOUT = float(os.environ.get("QUICK_HTTP_TIMEOUT", "8"))
+QUICK_HTTP_RETRIES = int(os.environ.get("QUICK_HTTP_RETRIES", "1"))
+# Timeout GLOBAL DUR du job de mise à jour : au-delà, état « error » propre (le job
+# ne peut JAMAIS rester bloqué indéfiniment). Rapide court, complet généreux (train).
+REFRESH_TIMEOUT_QUICK_S = float(os.environ.get("REFRESH_TIMEOUT_QUICK_S", "25"))
+REFRESH_TIMEOUT_FULL_S = float(os.environ.get("REFRESH_TIMEOUT_FULL_S", "300"))
+
 # --- Ligues de clubs -------------------------------------------------------
 # Chaque ligue relie le code football-data, le code understat et un libellé commun.
 # competition = libellé canonique stocké dans la base (identique côté matches).
@@ -108,6 +122,13 @@ CLUB_SEASONS = [
 FD_BASE_URL = "https://www.football-data.co.uk/mmz4281"
 UNDERSTAT_URL = "https://understat.com/getLeagueData/{league}/{season}"
 INTL_RESULTS_URL = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
+# Buteurs des sélections (même dépôt martj42, noms d'équipes alignés sur results.csv).
+INTL_SCORERS_URL = "https://raw.githubusercontent.com/martj42/international_results/master/goalscorers.csv"
+# Fenêtre d'AGRÉGATION des buts (reflète l'effectif actif : on ignore l'historique lointain).
+INTL_SCORER_SINCE_YEAR = int(os.environ.get("INTL_SCORER_SINCE_YEAR", "2022"))
+# Filtre ANTI-RETRAITÉS appliqué à la LECTURE (donc auto-adaptatif dans le temps) :
+# un joueur sans but depuis plus de N ans n'est plus proposé.
+INTL_SCORER_ACTIVE_YEARS = float(os.environ.get("INTL_SCORER_ACTIVE_YEARS", "3"))
 
 DOMAIN_CLUB = "club"
 DOMAIN_INTL = "international"

@@ -23,13 +23,14 @@ log = logging.getLogger("pipeline.understat")
 _HEADERS = {"X-Requested-With": "XMLHttpRequest"}
 
 
-def fetch_league_season(league: dict, season: dict, use_cache: bool = True) -> pd.DataFrame:
+def fetch_league_season(league: dict, season: dict, use_cache: bool = True,
+                        ttl_hours: float | None = None) -> pd.DataFrame:
     url = config.UNDERSTAT_URL.format(league=league["understat"], season=season["understat"])
     raw = http.fetch(
         url,
         cache_key=f"understat:{league['understat']}:{season['understat']}",
         headers={**_HEADERS, "Referer": f"https://understat.com/league/{league['understat']}/{season['understat']}"},
-        use_cache=use_cache,
+        use_cache=use_cache, ttl_hours=ttl_hours,
     )
     data = json.loads(raw)
     rows = []
@@ -56,12 +57,12 @@ def fetch_league_season(league: dict, season: dict, use_cache: bool = True) -> p
     return df
 
 
-def fetch_all(use_cache: bool = True) -> pd.DataFrame:
+def fetch_all(use_cache: bool = True, ttl_hours: float | None = None) -> pd.DataFrame:
     frames = []
     for league in config.CLUB_LEAGUES:
         for season in config.CLUB_SEASONS:
             try:
-                df = fetch_league_season(league, season, use_cache=use_cache)
+                df = fetch_league_season(league, season, use_cache=use_cache, ttl_hours=ttl_hours)
             except Exception as e:  # noqa: BLE001
                 log.error("échec understat %s %s: %s", league["competition"], season["label"], e)
                 continue
@@ -76,7 +77,8 @@ def fetch_all(use_cache: bool = True) -> pd.DataFrame:
 # Données JOUEUR (buteurs) : le même endpoint getLeagueData renvoie, en plus des
 # matchs, une liste `players` (totaux de la saison) avec buts, xG, minutes, poste.
 # ---------------------------------------------------------------------------
-def fetch_league_players(league: dict, season: dict, use_cache: bool = True) -> pd.DataFrame:
+def fetch_league_players(league: dict, season: dict, use_cache: bool = True,
+                         ttl_hours: float | None = None) -> pd.DataFrame:
     """Renvoie les totaux par joueur d'une ligue/saison.
 
     Colonnes : understat_id, player_name, team_title (libellé understat), competition,
@@ -87,7 +89,7 @@ def fetch_league_players(league: dict, season: dict, use_cache: bool = True) -> 
         url,
         cache_key=f"understat:{league['understat']}:{season['understat']}",
         headers={**_HEADERS, "Referer": f"https://understat.com/league/{league['understat']}/{season['understat']}"},
-        use_cache=use_cache,
+        use_cache=use_cache, ttl_hours=ttl_hours,
     )
     data = json.loads(raw)
     rows = []
@@ -116,12 +118,12 @@ def fetch_league_players(league: dict, season: dict, use_cache: bool = True) -> 
     return df
 
 
-def fetch_players_all(use_cache: bool = True) -> pd.DataFrame:
+def fetch_players_all(use_cache: bool = True, ttl_hours: float | None = None) -> pd.DataFrame:
     frames = []
     for league in config.CLUB_LEAGUES:
         for season in config.CLUB_SEASONS:
             try:
-                df = fetch_league_players(league, season, use_cache=use_cache)
+                df = fetch_league_players(league, season, use_cache=use_cache, ttl_hours=ttl_hours)
             except Exception as e:  # noqa: BLE001
                 log.error("échec joueurs understat %s %s: %s",
                           league["competition"], season["label"], e)

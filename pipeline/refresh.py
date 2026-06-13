@@ -228,51 +228,69 @@ def _num(v):
         return None
 
 
-def refresh(use_cache: bool = True) -> dict:
+def refresh(use_cache: bool = True, quick: bool = False) -> dict:
+    """Reconstruit la base depuis les sources.
+
+    `quick=True` (bouton « Rapide ») : ne re-télécharge QUE les sources légères
+    (résultats football-data + martj42) et RÉUTILISE le cache disque des sources
+    lentes (xG/joueurs understat) tant qu'il est plus frais que `QUICK_HEAVY_TTL_HOURS`.
+    Un timeout réseau court par source évite tout blocage long. Le mode complet
+    (`quick=False`) re-télécharge tout, sans plafond de cache.
+    """
+    # En rapide : cache lourd réutilisé (TTL 24h) + timeout réseau court par source.
+    heavy_cache = True if quick else use_cache
+    heavy_ttl = config.QUICK_HEAVY_TTL_HOURS if quick else None
+    saved_net = (config.HTTP_TIMEOUT, config.HTTP_RETRIES)
+    if quick:
+        config.HTTP_TIMEOUT = config.QUICK_HTTP_TIMEOUT
+        config.HTTP_RETRIES = config.QUICK_HTTP_RETRIES
+
     conn = db.connect()
     db.reset_schema(conn)
     summary = {}
-
-    log.info("== CLUBS (football-data.co.uk) ==")
-    df_fd = football_data.fetch_all(use_cache=use_cache)
-    n_clubs = ingest_clubs(conn, df_fd) if not df_fd.empty else 0
-    db.log_run(conn, "football-data", n_clubs, "ok" if n_clubs else "vide")
-    summary["clubs"] = n_clubs
-
-    log.info("== xG (understat.com) ==")
     try:
-        df_und = understat.fetch_all(use_cache=use_cache)
-        n_xg = attach_xg(conn, df_fd, df_und) if not df_und.empty else 0
-        db.log_run(conn, "understat", n_xg, "ok" if n_xg else "vide")
-    except Exception as e:  # noqa: BLE001
-        log.error("understat indisponible: %s", e)
-        db.log_run(conn, "understat", 0, "erreur", str(e))
-        n_xg = 0
-    summary["xg_attached"] = n_xg
+        log.info("== CLUBS (football-data.co.uk)%s ==", " [rapide]" if quick else "")
+        df_fd = football_data.fetch_all(use_cache=use_cache)
+        n_clubs = ingest_clubs(conn, df_fd) if not df_fd.empty else 0
+        db.log_run(conn, "football-data", n_clubs, "ok" if n_clubs else "vide")
+        summary["clubs"] = n_clubs
 
-    log.info("== JOUEURS (understat.com) ==")
-    try:
-        df_players = understat.fetch_players_all(use_cache=use_cache)
-        n_players = ingest_players(conn, df_players) if not df_players.empty else 0
-        db.log_run(conn, "understat-players", n_players, "ok" if n_players else "vide")
-    except Exception as e:  # noqa: BLE001
-        log.error("joueurs understat indisponibles: %s", e)
-        db.log_run(conn, "understat-players", 0, "erreur", str(e))
-        n_players = 0
-    summary["players"] = n_players
+        log.info("== xG (understat.com)%s ==", " [cache]" if quick else "")
+        try:
+            df_und = understat.fetch_all(use_cache=heavy_cache, ttl_hours=heavy_ttl)
+            n_xg = attach_xg(conn, df_fd, df_und) if not df_und.empty else 0
+            db.log_run(conn, "understat", n_xg, "ok" if n_xg else "vide")
+        except Exception as e:  # noqa: BLE001
+            log.error("understat indisponible: %s", e)
+            db.log_run(conn, "understat", 0, "erreur", str(e))
+            n_xg = 0
+        summary["xg_attached"] = n_xg
 
-    log.info("== SÉLECTIONS (martj42) ==")
-    df_intl, df_fix = martj42.fetch_all(use_cache=use_cache)
-    n_intl = ingest_internationals(conn, df_intl) if not df_intl.empty else 0
-    db.log_run(conn, "martj42", n_intl, "ok" if n_intl else "vide")
-    n_fix = ingest_fixtures(conn, df_fix) if not df_fix.empty else 0
-    db.log_run(conn, "fixtures", n_fix, "ok" if n_fix else "vide")
-    summary["internationals"] = n_intl
-    summary["fixtures"] = n_fix
+        log.info("== JOUEURS (understat.com)%s ==", " [cache]" if quick else "")
+        try:
+            df_players = understat.fetch_players_all(use_cache=heavy_cache, ttl_hours=heavy_ttl)
+            n_players = ingest_players(conn, df_players) if not df_players.empty else 0
+            db.log_run(conn, "understat-players", n_players, "ok" if n_players else "vide")
+        except Exception as e:  # noqa: BLE001
+            log.error("joueurs understat indisponibles: %s", e)
+            db.log_run(conn, "understat-players", 0, "erreur", str(e))
+            n_players = 0
+        summary["players"] = n_players
 
-    n_teams = conn.execute("SELECT COUNT(*) FROM teams").fetchone()[0]
-    summary["teams"] = n_teams
-    conn.close()
+        log.info("== SÉLECTIONS (martj42) ==")
+        df_intl, df_fix = martj42.fetch_all(use_cache=use_cache)
+        n_intl = ingest_internationals(conn, df_intl) if not df_intl.empty else 0
+        db.log_run(conn, "martj42", n_intl, "ok" if n_intl else "vide")
+        n_fix = ingest_fixtures(conn, df_fix) if not df_fix.empty else 0
+        db.log_run(conn, "fixtures", n_fix, "ok" if n_fix else "vide")
+        summary["internationals"] = n_intl
+        summary["fixtures"] = n_fix
+
+        n_teams = conn.execute("SELECT COUNT(*) FROM teams").fetchone()[0]
+        summary["teams"] = n_teams
+    finally:
+        conn.close()
+        config.HTTP_TIMEOUT, config.HTTP_RETRIES = saved_net
 
     log.info("== TERMINÉ == clubs=%(clubs)d xG=%(xg_attached)d joueurs=%(players)d "
              "intl=%(internationals)d fixtures=%(fixtures)d équipes=%(teams)d", summary)

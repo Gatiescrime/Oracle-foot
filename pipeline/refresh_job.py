@@ -22,7 +22,7 @@ import logging
 import threading
 from datetime import datetime, timezone
 
-from . import db, features, refresh, service, train
+from . import config, db, features, refresh, service, train
 
 log = logging.getLogger("pipeline.refresh_job")
 
@@ -34,6 +34,9 @@ _state: dict = {
     "finished_at": None,
     "message": "",
 }
+# Génération du job : un worker abandonné (timeout) ne doit jamais réécrire l'état
+# d'un job plus récent. Incrémentée à chaque `run`.
+_generation = 0
 
 
 def _now() -> str:
@@ -80,10 +83,16 @@ def start(mode: str = "rapide") -> bool:
     return True
 
 
-def run(mode: str = "rapide") -> None:
-    """Exécute la mise à jour (bloquant) ; appelé en tâche de fond après `start`."""
+def _do_work(mode: str, result: dict) -> None:
+    """Le travail réel (réseau + features + éventuel entraînement).
+
+    Écrit SON résultat dans `result` (jamais dans `_state`) : si ce worker est
+    abandonné après un dépassement de délai, il ne peut pas corrompre l'état d'un
+    job plus récent. Le contrôleur (`run`) seul met `_state` à jour.
+    """
     try:
-        summary = refresh.refresh(use_cache=False)
+        quick = mode != "complet"
+        summary = refresh.refresh(use_cache=False, quick=quick)
         feats = features.build_all()
         msg = (f"Données rafraîchies : {summary.get('clubs', 0)} matchs clubs, "
                f"{summary.get('internationals', 0)} sélections, "
@@ -93,13 +102,47 @@ def run(mode: str = "rapide") -> None:
             train.train_all()
             msg += " Modèles réentraînés."
         service.clear_caches()
-        _persist_last_updated()
-        _state.update(state="done", finished_at=_now(), message=msg)
-        log.info("Mise à jour %s terminée : %s", mode, msg)
+        result["state"] = "done"
+        result["message"] = msg
     except Exception as e:  # noqa: BLE001 — jamais de crash, on remonte l'erreur
         log.exception("Mise à jour %s en échec", mode)
-        _state.update(state="error", finished_at=_now(),
-                      message=f"Échec de la mise à jour : {e}")
+        result["state"] = "error"
+        result["message"] = f"Échec de la mise à jour : {e}"
+
+
+def run(mode: str = "rapide") -> None:
+    """Pilote la mise à jour avec un TIMEOUT GLOBAL DUR : le job ne peut jamais
+    rester bloqué. Le travail tourne dans un thread ; au-delà du délai, l'état
+    bascule proprement en « error » et le thread (démon) est abandonné.
+    """
+    global _generation
+    with _lock:
+        _generation += 1
+        gen = _generation
+    timeout = (config.REFRESH_TIMEOUT_FULL_S if mode == "complet"
+               else config.REFRESH_TIMEOUT_QUICK_S)
+
+    result: dict = {}
+    worker = threading.Thread(target=_do_work, args=(mode, result), daemon=True)
+    worker.start()
+    worker.join(timeout)
+
+    with _lock:
+        if gen != _generation:           # un job plus récent a pris la main
+            return
+        if worker.is_alive():            # dépassement de délai : jamais bloqué
+            _state.update(state="error", finished_at=_now(),
+                          message=("Délai dépassé : le réseau est trop lent. "
+                                   "Réessaie plus tard (les sources lentes sont mises en cache)."))
+            log.error("Mise à jour %s : délai global de %.0fs dépassé", mode, timeout)
+            return
+        if result.get("state") == "done":
+            _persist_last_updated()
+            _state.update(state="done", finished_at=_now(), message=result["message"])
+            log.info("Mise à jour %s terminée : %s", mode, result["message"])
+        else:
+            _state.update(state="error", finished_at=_now(),
+                          message=result.get("message", "Échec de la mise à jour."))
 
 
 def status() -> dict:

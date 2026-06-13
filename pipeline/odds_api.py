@@ -39,17 +39,9 @@ SPORT_KEYS = {
     "FIFA World Cup qualification": "soccer_fifa_world_cup_qualifiers_europe",
 }
 
-# Sélections dont le libellé the-odds-api diffère de notre nom canonique.
-# (Le reste est résolu par appariement flou ; on ne force que les pièges.)
-TEAM_OVERRIDES = {
-    "usa": "United States",
-    "south korea": "South Korea",
-    "north korea": "North Korea",
-    "ivory coast": "Ivory Coast",
-    "czech republic": "Czech Republic",
-    "turkiye": "Turkey",
-    "türkiye": "Turkey",
-}
+# Les écarts de libellé de sélections (USA↔United States, Czechia↔Czech Republic…)
+# sont désormais centralisés dans `names.NATION_ALIASES` et résolus, dans les deux
+# sens, par `names.alias_key` / `names.resolve_alias` (voir `find_event`).
 
 # Dernier quota connu (rempli à chaque appel réseau réussi) : affiché en UI.
 _LAST_QUOTA: dict = {"remaining": None, "used": None}
@@ -164,29 +156,32 @@ def best_prices(event: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Appariement d'un match (noms API <-> noms canoniques de la base).
 # ---------------------------------------------------------------------------
-def _canon(label: str) -> str:
-    return names._norm(label)
-
-
-def _override(label: str) -> str | None:
-    return TEAM_OVERRIDES.get(_canon(label))
-
-
 def find_event(events: list[dict], home: str, away: str,
                min_score: float = 0.6) -> dict | None:
-    """Retrouve l'événement API correspondant à (home, away) par appariement flou.
+    """Retrouve l'événement API correspondant à (home, away).
 
-    Teste les deux ordres (l'API peut désigner « home » différemment de nous) et
-    renvoie le meilleur si le score combiné dépasse le seuil.
+    Appariement en deux temps, dans les DEUX ordres (l'API peut intervertir
+    domicile/extérieur) :
+      1. correspondance EXACTE sur la clé d'alias (`names.alias_key`) : règle d'un
+         coup les écarts de libellé connus (USA↔United States, Czechia↔Czech
+         Republic, Manchester City↔Man City…) → score 1.0 ;
+      2. sinon appariement FLOU sur les libellés résolus (alias appliqués), pour
+         les cas non listés.
+    Renvoie le meilleur événement si le score combiné dépasse le seuil.
     """
     if not events:
         return None
-    h_t, a_t = _override(home) or home, _override(away) or away
+    hk, ak = names.alias_key(home), names.alias_key(away)
+    h_r, a_r = names.resolve_alias(home), names.resolve_alias(away)
     best, best_score, best_swap = None, 0.0, False
     for ev in events:
         eh, ea = ev.get("home_team", ""), ev.get("away_team", "")
-        direct = min(names._similarity(h_t, eh), names._similarity(a_t, ea))
-        swap = min(names._similarity(h_t, ea), names._similarity(a_t, eh))
+        ehk, eak = names.alias_key(eh), names.alias_key(ea)
+        ehr, ear = names.resolve_alias(eh), names.resolve_alias(ea)
+        direct = (1.0 if (hk == ehk and ak == eak)
+                  else min(names._similarity(h_r, ehr), names._similarity(a_r, ear)))
+        swap = (1.0 if (hk == eak and ak == ehk)
+                else min(names._similarity(h_r, ear), names._similarity(a_r, ehr)))
         score, swapped = (direct, False) if direct >= swap else (swap, True)
         if score > best_score:
             best, best_score, best_swap = ev, score, swapped

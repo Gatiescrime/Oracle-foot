@@ -52,3 +52,41 @@ def fetch_all(use_cache: bool = True) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     log.info("sélections : %d matchs joués, %d à venir", len(results), len(fixtures))
     return results, fixtures
+
+
+def fetch_goalscorers(use_cache: bool = True) -> pd.DataFrame:
+    """Buteurs des sélections, agrégés sur une fenêtre RÉCENTE par (équipe, joueur).
+
+    Le CSV goalscorers.csv (colonnes date,home_team,away_team,team,scorer,minute,
+    own_goal,penalty) liste chaque but de l'histoire internationale. On ne garde que
+    les buts récents (>= INTL_SCORER_SINCE_YEAR) pour refléter l'effectif actif, on
+    EXCLUT les buts contre son camp (own_goal=TRUE), puis on compte par buteur et on
+    note la date du dernier but. Les libellés d'équipes sont ceux de results.csv -> ils
+    s'alignent directement sur nos noms canoniques de sélections.
+
+    Renvoie un DataFrame {team, scorer, goals, last_date} (vide si source indisponible).
+    """
+    raw = http.fetch(config.INTL_SCORERS_URL, cache_key="martj42:goalscorers", use_cache=use_cache)
+    df = pd.read_csv(io.BytesIO(raw))
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    own = df["own_goal"].astype(str).str.upper().eq("TRUE")
+    keep = df[
+        df["date"].notna()
+        & df["scorer"].notna()
+        & ~own
+        & (df["date"].dt.year >= config.INTL_SCORER_SINCE_YEAR)
+    ].copy()
+    keep["team"] = keep["team"].astype(str).str.strip()
+    keep["scorer"] = keep["scorer"].astype(str).str.strip()
+    keep = keep[(keep["team"] != "") & (keep["scorer"] != "")]
+
+    agg = (
+        keep.groupby(["team", "scorer"])
+        .agg(goals=("scorer", "size"), last_date=("date", "max"))
+        .reset_index()
+    )
+    agg["last_date"] = agg["last_date"].dt.strftime("%Y-%m-%d")
+    agg = agg.sort_values(["team", "goals"], ascending=[True, False]).reset_index(drop=True)
+    log.info("buteurs sélections : %d couples (équipe, joueur) depuis %d",
+             len(agg), config.INTL_SCORER_SINCE_YEAR)
+    return agg

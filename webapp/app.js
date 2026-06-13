@@ -15,13 +15,29 @@ function badgeHTML(b) {
       ` src="https://flagcdn.com/32x24/${b.iso}.png"` +
       ` srcset="https://flagcdn.com/64x48/${b.iso}.png 2x">`;
   }
-  return `<span class="team-badge pill" aria-hidden="true" style="--pill:${b.color}">${esc(b.text)}</span>`;
+  const pill = `<span class="team-badge pill" aria-hidden="true" style="--pill:${b.color}">${esc(b.text)}</span>`;
+  // Club avec écusson : on tente l'image ; si elle échoue, on remet la pastille (zéro trou).
+  // Le repli est géré par un écouteur global (voir plus bas) : pas de handler inline.
+  if (b.crest) {
+    return `<img class="team-badge crest" alt="" loading="lazy" width="22" height="22"` +
+      ` src="${esc(b.crest)}" data-fb="${esc(pill)}">`;
+  }
+  return pill;
 }
-// Étiquette d'option <select> : emoji drapeau si dispo (les <option> n'affichent pas d'image).
-const optLabel = (t) => (t.badge && t.badge.emoji ? t.badge.emoji + "  " : "") + t.name;
 
+/* Repli d'écusson : si une image de club ne charge pas, on la remplace par sa pastille
+   d'initiales (data-fb). Capture car l'évènement « error » des images ne remonte pas. */
+document.addEventListener("error", (e) => {
+  const img = e.target;
+  if (img && img.tagName === "IMG" && img.classList.contains("crest") && img.dataset.fb) {
+    img.outerHTML = img.dataset.fb;   // dataset décode déjà les entités HTML
+  }
+}, true);
 let COMPS = { club: [], international: [] };
 let LASTPRED = null;
+// Équipes du domaine courant : maps pour la recherche par saisie (typeahead datalist).
+let TEAM_NAME = {};     // id -> nom affichable
+let TEAM_ID = {};       // nom (minuscule) -> id
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -76,14 +92,27 @@ async function loadTeams() {
   const domain = currentDomain();
   try {
     const data = await api("/api/teams?domain=" + domain);
-    const teams = (data.teams || []).slice().sort((a, b) => (b.elo || 0) - (a.elo || 0));
-    const opts = teams.map((t) => `<option value="${t.id}">${optLabel(t)}</option>`).join("");
-    $("home").innerHTML = opts;
-    $("away").innerHTML = opts;
-    if (teams.length > 1) $("away").selectedIndex = 1;
+    const teams = (data.teams || []).slice();
+    // maps id <-> nom (résolution de la saisie -> identifiant envoyé à l'API)
+    TEAM_NAME = {}; TEAM_ID = {};
+    teams.forEach((t) => { TEAM_NAME[t.id] = t.name; TEAM_ID[t.name.toLowerCase()] = t.id; });
+    // datalist trié par ordre alphabétique : confortable pour la recherche au clavier
+    const byName = teams.slice().sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    const opts = byName.map((t) => `<option value="${esc(t.name)}">`).join("");
+    $("homeList").innerHTML = opts;
+    $("awayList").innerHTML = opts;
+    // valeurs par défaut : les deux meilleures équipes (Elo), pour une affiche crédible
+    const byElo = teams.slice().sort((a, b) => (b.elo || 0) - (a.elo || 0));
+    $("home").value = byElo[0] ? byElo[0].name : "";
+    $("away").value = byElo[1] ? byElo[1].name : "";
   } catch (e) {
     setStatus("Impossible de charger les équipes : " + e.message, true);
   }
+}
+
+/* Saisie d'une équipe -> identifiant (null si le texte ne correspond à aucune équipe). */
+function teamId(el) {
+  return TEAM_ID[(el.value || "").trim().toLowerCase()] || null;
 }
 
 /* ---------------------------------------------------------------- UI events */
@@ -94,7 +123,7 @@ function bindUI() {
   document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => switchView(t.dataset.view)));
 
   $("refreshBtn").addEventListener("click", () => { $("refreshModal").hidden = false; });
-  $("refreshCancel").addEventListener("click", () => { $("refreshModal").hidden = true; });
+  $("refreshCancel").addEventListener("click", cancelRefresh);
   $("refreshStart").addEventListener("click", startRefresh);
 
   $("simBtn").addEventListener("click", runSimulation);
@@ -121,8 +150,8 @@ function analyzeMatch(competition, homeId, awayId, neutral) {
   switchView("predict");
   if ([...$("competition").options].some((o) => o.value === competition)) $("competition").value = competition;
   loadTeams().then(() => {
-    $("home").value = homeId;
-    $("away").value = awayId;
+    $("home").value = TEAM_NAME[homeId] || homeId;
+    $("away").value = TEAM_NAME[awayId] || awayId;
     $("neutral").checked = !!neutral;
     if (neutral) { $("advToggle").checked = true; $("advanced").hidden = false; }
     $("predictForm").requestSubmit();
@@ -140,8 +169,8 @@ function setStatus(msg, err) {
 async function onAnalyze(e) {
   e.preventDefault();
   const competition = $("competition").value;
-  const home = $("home").value, away = $("away").value;
-  if (!home || !away) return;
+  const home = teamId($("home")), away = teamId($("away"));
+  if (!home || !away) { setStatus("Choisis deux équipes dans la liste proposée.", true); return; }
   if (home === away) { setStatus("Choisis deux équipes différentes.", true); return; }
 
   const neutral = $("neutral").checked;
@@ -231,6 +260,12 @@ function renderPrediction(p) {
 async function renderActuWithBase(pred, competition, home, away, neutral, useQ) {
   let base = null;
   if (useQ && pred.qualitative) {
+    // état de chargement : la carte actu attend l'écho « sans actu » (réseau),
+    // on évite ainsi un apparition tardive et brutale du panneau.
+    const card = $("actuCard");
+    $("actuBody").innerHTML =
+      `<p style="color:var(--muted)"><span class="spinner"></span>Comparaison avec et sans l'actualité…</p>`;
+    card.hidden = false;
     try {
       base = await api("/api/predict", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -653,6 +688,16 @@ async function startRefresh() {
     setRefreshMsg(e.message);
     $("refreshStart").disabled = false;
   }
+}
+
+/* Annuler : stoppe le suivi et referme proprement (la tâche de fond, si lancée,
+   se terminera ou expirera seule côté serveur grâce au timeout global dur). */
+function cancelRefresh() {
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  refreshStartTs = 0;
+  $("refreshStart").disabled = false;
+  $("refreshProgress").hidden = true;
+  $("refreshModal").hidden = true;
 }
 
 async function pollRefresh() {

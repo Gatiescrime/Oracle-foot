@@ -53,12 +53,16 @@
         <div class="matchup">
           <div class="field">
             <label for="home">Équipe à domicile</label>
-            <select id="home" required></select>
+            <input id="home" list="homeList" type="text" required autocomplete="off"
+                   placeholder="Tape pour chercher…" enterkeyhint="search">
+            <datalist id="homeList"></datalist>
           </div>
           <div class="vs" aria-hidden="true">vs</div>
           <div class="field">
             <label for="away">Équipe à l'extérieur</label>
-            <select id="away" required></select>
+            <input id="away" list="awayList" type="text" required autocomplete="off"
+                   placeholder="Tape pour chercher…" enterkeyhint="search">
+            <datalist id="awayList"></datalist>
           </div>
         </div>
 
@@ -270,7 +274,7 @@
       </div>
       <div id="refreshProgress" class="refresh-progress" hidden><i></i><span>Mise à jour en cours…</span></div>
       <div class="modal-actions">
-        <button class="ghost-btn" id="refreshCancel">Fermer</button>
+        <button class="ghost-btn" id="refreshCancel">Annuler</button>
         <button class="cta" id="refreshStart">Lancer</button>
       </div>
     </div>

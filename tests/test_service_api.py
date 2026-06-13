@@ -177,6 +177,21 @@ def test_predict_includes_factual_why():
     assert any("neutre" in f for f in pn["why"]["factors"])
 
 
+def test_explain_adds_h2h_and_rest_factors():
+    """`_explain` enrichit l'explication avec les face-à-face et l'écart de repos."""
+    from pipeline import service
+    feat = {"elo_diff": 200, "home_form5_ppg": 2.0, "away_form5_ppg": 1.0,
+            "home_advantage": 1, "home_rest_days": 9, "away_rest_days": 3}
+    h2h = {"n": 5, "home_wins": 3, "draws": 1, "away_wins": 1}
+    why = service._explain(feat, "Alpha", "Beta", neutral=False, h2h=h2h)
+    txt = " ".join(why["factors"]).lower()
+    assert "confrontations directes" in txt          # bilan des face-à-face
+    assert "repos" in txt and "alpha" in txt          # Alpha (9 j) plus reposé que Beta (3 j)
+    # sans h2h ni écart de repos notable : pas de facteur superflu (robustesse)
+    why2 = service._explain({"elo_diff": 5}, "Alpha", "Beta", neutral=False, h2h=None)
+    assert all("confrontations" not in f for f in why2["factors"])
+
+
 def test_best_value_today_surfaces_positive_edge(monkeypatch):
     """Une cote volontairement gonflée crée une value que l'encart doit remonter."""
     from datetime import datetime, timedelta, timezone
@@ -252,6 +267,29 @@ def test_pwa_assets_served():
     assert "addEventListener" in sw.text
     # le SW ne doit jamais mettre en cache les appels /api/
     assert "/api/" in sw.text
+
+
+def test_prediction_cache_hit_and_invalidation():
+    """Le socle statistique est mis en cache (résultat identique, copie isolée)
+    et le cache est vidé par `clear_caches` (après un refresh / ré-entraînement)."""
+    from pipeline import service
+
+    service.clear_caches()
+    assert service._PRED_CACHE == {}
+
+    p1 = service.predict("Premier League", "Man City", "Liverpool", neutral=False)
+    assert len(service._PRED_CACHE) == 1                 # entrée mémorisée
+    p2 = service.predict("Premier League", "Man City", "Liverpool", neutral=False)
+    assert p1 == p2                                      # même contenu
+    assert p1 is not p2                                  # copie : pas le même objet
+
+    # muter le retour ne corrompt pas l'entrée en cache (deep copy)
+    p2["p_home_win"] = 999
+    p3 = service.predict("Premier League", "Man City", "Liverpool", neutral=False)
+    assert p3["p_home_win"] != 999
+
+    service.clear_caches()
+    assert service._PRED_CACHE == {}                     # invalidé
 
 
 def test_qualitative_status_endpoint():

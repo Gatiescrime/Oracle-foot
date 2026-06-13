@@ -51,6 +51,40 @@ OVERRIDES = {
 }
 
 
+# Variantes connues de NOMS DE SÉLECTIONS d'une source à l'autre (the-odds-api,
+# FIFA, bookmakers…). clé = libellé NORMALISÉ (accents/casse/ponctuation retirés,
+# espaces compactés) ; valeur = nom canonique de NOTRE base (libellés martj42).
+# But : qu'« USA », « Korea Republic », « Czechia », « Côte d'Ivoire »… tombent sur
+# le bon pays, dans les deux sens d'appariement. Priorité aux nations de Coupe du
+# Monde / grandes sélections, là où l'écart de libellé est fréquent.
+NATION_ALIASES = {
+    "usa": "United States",
+    "united states of america": "United States",
+    "korea republic": "South Korea",
+    "republic of korea": "South Korea",
+    "south korea": "South Korea",
+    "korea dpr": "North Korea",
+    "dpr korea": "North Korea",
+    "ir iran": "Iran",
+    "iran islamic republic of": "Iran",
+    "czechia": "Czech Republic",
+    "cote d ivoire": "Ivory Coast",
+    "ivory coast": "Ivory Coast",
+    "turkiye": "Turkey",
+    "china pr": "China",
+    "chinese taipei": "Taiwan",
+    "congo dr": "DR Congo",
+    "dr congo": "DR Congo",
+    "democratic republic of congo": "DR Congo",
+    "ireland": "Republic of Ireland",
+    "republic of ireland": "Republic of Ireland",
+    "bosnia herzegovina": "Bosnia and Herzegovina",
+    "bosnia and herzegovina": "Bosnia and Herzegovina",
+    "cabo verde": "Cape Verde",
+    "cape verde islands": "Cape Verde",
+}
+
+
 def slugify(name: str) -> str:
     """Identifiant canonique stable et lisible (sans accents, en minuscules)."""
     s = unicodedata.normalize("NFKD", name)
@@ -58,6 +92,30 @@ def slugify(name: str) -> str:
     s = s.lower().strip()
     s = re.sub(r"[^a-z0-9]+", "_", s)
     return s.strip("_")
+
+
+def resolve_alias(label: str) -> str:
+    """Nom canonique connu pour `label`, robuste aux variantes de sources.
+
+    - Sélections : table `NATION_ALIASES` (USA→United States, Czechia→Czech Republic…).
+    - Clubs : `OVERRIDES` (libellé long understat → nom court football-data).
+    Sinon, renvoie `label` inchangé.
+    """
+    key = " ".join(_norm(label).split())          # normalisé + espaces compactés
+    if key in NATION_ALIASES:
+        return NATION_ALIASES[key]
+    if key in OVERRIDES:
+        return OVERRIDES[key]
+    return label
+
+
+def alias_key(label: str) -> str:
+    """Clé de comparaison stable et tolérante (accents, casse, alias connus).
+
+    Deux libellés qui désignent la même équipe (« USA » / « United States »,
+    « Manchester City » / « Man City ») produisent la MÊME clé.
+    """
+    return slugify(resolve_alias(label))
 
 
 def _norm(name: str) -> str:
