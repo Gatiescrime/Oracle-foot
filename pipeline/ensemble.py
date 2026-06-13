@@ -112,8 +112,17 @@ class EnsemblePredictor:
                 feat: dict | None = None, max_goals: int = 10,
                 adjustment: dict | None = None,
                 market_probs: np.ndarray | None = None,
-                blend_weight: float | None = None) -> dict:
+                blend_weight: float | None = None,
+                host_log_bonus: tuple[float, float] = (0.0, 0.0)) -> dict:
         lam, mu, w = self.predict_lambdas(home, away, neutral, feat)
+
+        # Effet « pays hôte » FIXE (Coupe du Monde) : bonus en log-buts ajouté aux
+        # buts attendus de l'hôte, même sur terrain neutre. Non appris -> aucune fuite.
+        # Appliqué AVANT l'ajustement qualitatif et la matrice. (0, 0) -> sans effet.
+        bh, ba = host_log_bonus
+        if bh or ba:
+            lam = float(np.clip(lam * np.exp(bh), 0.05, 8.0))
+            mu = float(np.clip(mu * np.exp(ba), 0.05, 8.0))
 
         # Ajustement qualitatif OPTIONNEL et BORNÉ (Phase 5) : multiplie les buts
         # attendus avant de reconstruire la matrice. Sans ajustement -> identique.
@@ -125,8 +134,21 @@ class EnsemblePredictor:
         pred = _matrix_to_prediction(mat, home, away, neutral, (lam, mu))
 
         # Calibration des trois probabilités 1/X/2 (renormalisées).
-        ph, pd_, pa = self.calibrator.transform_one(
-            pred["p_home_win"], pred["p_draw"], pred["p_away_win"])
+        rh, rd, ra = pred["p_home_win"], pred["p_draw"], pred["p_away_win"]
+        if neutral:
+            # Terrain neutre : l'étiquette domicile/extérieur est ARBITRAIRE. Le socle
+            # Poisson est déjà symétrique, mais le calibrateur — appris surtout sur des
+            # matchs AVEC avantage du terrain — applique une correction domicile↓/
+            # extérieur↑ injustifiée ici (elle ferait perdre l'hôte du Mondial alors
+            # que ses buts attendus sont supérieurs). On la neutralise en moyennant
+            # avec l'orientation inversée -> prédiction invariante par échange d'équipes.
+            ch, cd, ca = self.calibrator.transform_one(rh, rd, ra)
+            sh, _sd, sa = self.calibrator.transform_one(ra, rd, rh)
+            ph, pd_, pa = 0.5 * (ch + sa), 0.5 * (cd + _sd), 0.5 * (ca + sh)
+            s = ph + pd_ + pa
+            ph, pd_, pa = (ph / s, pd_ / s, pa / s) if s > 0 else (ch, cd, ca)
+        else:
+            ph, pd_, pa = self.calibrator.transform_one(rh, rd, ra)
 
         # Mélange optionnel avec le marché (Phase P2) : APRÈS calibration. Le poids
         # vient de l'argument explicite, sinon de la config (par défaut 0 -> no-op).

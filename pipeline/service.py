@@ -35,6 +35,26 @@ def domain_of(competition: str) -> str:
     return config.DOMAIN_CLUB if competition in _CLUB_COMPETITIONS else config.DOMAIN_INTL
 
 
+def _host_log_bonus(competition: str, home_name: str,
+                    away_name: str) -> tuple[float, float, str | None]:
+    """Bonus FIXE de pays hôte en Coupe du Monde, en log-buts.
+
+    Renvoie (bonus_domicile, bonus_extérieur, nom_de_l_hôte). Valeur a priori
+    (jamais ajustée sur les résultats -> aucune fuite). Si les deux équipes sont
+    co-hôtes, aucune des deux n'a d'avantage différentiel -> (0, 0, None).
+    """
+    if competition != config.WORLD_CUP_COMPETITION:
+        return 0.0, 0.0, None
+    b = config.HOST_GOAL_LOG_BONUS
+    home_host = home_name in config.WORLD_CUP_HOSTS
+    away_host = away_name in config.WORLD_CUP_HOSTS
+    if home_host and not away_host:
+        return b, 0.0, home_name
+    if away_host and not home_host:
+        return 0.0, b, away_name
+    return 0.0, 0.0, None
+
+
 # Cache des prédictions statistiques identiques (même match, mêmes options).
 # Déterministe tant que les modèles/snapshots ne changent pas : vidé par
 # `clear_caches()` après un refresh / ré-entraînement. On ne met EN cache que le
@@ -165,7 +185,7 @@ def _h2h_record(domain: str, hid: str, aid: str, limit: int = 8) -> dict | None:
 
 
 def _explain(feat: dict, home: str, away: str, neutral: bool,
-             h2h: dict | None = None) -> dict:
+             h2h: dict | None = None, host: str | None = None) -> dict:
     """Explication factuelle des facteurs dominants, à partir des SEULES features
     déjà utilisées par le modèle (pré-match, sans aucune fuite).
 
@@ -206,6 +226,11 @@ def _explain(feat: dict, home: str, away: str, neutral: bool,
         factors.append("Terrain neutre : pas d'avantage du domicile.")
     elif _num(feat.get("home_advantage")):
         factors.append(f"{home} profite de l'avantage de jouer à domicile.")
+
+    # 3 bis. Pays hôte de la Coupe du Monde : avantage réel même sur terrain neutre.
+    if host:
+        factors.append(f"{host} joue la Coupe du Monde à domicile (pays hôte) : "
+                       f"un avantage marqué, en plus du reste.")
 
     # 4. Confrontations directes (historique réel des face-à-face).
     if h2h and h2h.get("n"):
@@ -253,7 +278,9 @@ def predict(competition: str, home: str, away: str, neutral: bool = False,
                  else bool(use_qualitative))
     # Cache process : on sert une copie pour isoler l'appelant (évite qu'une
     # mutation aval ne corrompe l'entrée). Uniquement pour le socle statistique.
-    cache_key = (domain, hid, aid, bool(neutral)) if not effective else None
+    # La compétition fait partie de la clé : elle change les features (avantage
+    # terrain spécifique) ET l'effet pays hôte en Coupe du Monde.
+    cache_key = (domain, competition, hid, aid, bool(neutral)) if not effective else None
     if cache_key is not None and cache_key in _PRED_CACHE:
         return copy.deepcopy(_PRED_CACHE[cache_key])
 
@@ -268,8 +295,13 @@ def predict(competition: str, home: str, away: str, neutral: bool = False,
     adjustment = _qualitative.adjust(home_name, away_name, competition,
                                      enabled_override=use_qualitative)
 
+    # Effet pays hôte (Coupe du Monde, fixe, sans fuite) : bonus de buts pour
+    # l'hôte, même sur terrain neutre.
+    bh, ba, host = _host_log_bonus(competition, home_name, away_name)
+
     pred = _predictor(domain).predict(hid, aid, neutral=neutral, feat=feat,
-                                      adjustment=adjustment)
+                                      adjustment=adjustment,
+                                      host_log_bonus=(bh, ba))
     pred["home"] = home_name
     pred["away"] = away_name
     pred["home_badge"] = badges.badge(home_name, domain)
@@ -277,7 +309,12 @@ def predict(competition: str, home: str, away: str, neutral: bool = False,
     pred["competition"] = competition
     pred["domain"] = domain
     pred["why"] = _explain(feat, home_name, away_name, neutral,
-                           h2h=_h2h_record(domain, hid, aid))
+                           h2h=_h2h_record(domain, hid, aid), host=host)
+    if host:
+        pred["host_effect"] = {
+            "team": host,
+            "goal_boost_pct": round((math.exp(config.HOST_GOAL_LOG_BONUS) - 1) * 100),
+        }
     # État EFFECTIF de la couche pour cette requête (l'UI affiche le bon panneau).
     pred["qualitative_enabled"] = effective
 

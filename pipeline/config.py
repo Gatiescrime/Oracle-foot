@@ -133,6 +133,23 @@ INTL_SCORER_ACTIVE_YEARS = float(os.environ.get("INTL_SCORER_ACTIVE_YEARS", "3")
 DOMAIN_CLUB = "club"
 DOMAIN_INTL = "international"
 
+# --- Effet « pays hôte » en Coupe du Monde (FIXE, non appris -> aucune fuite) ---
+# Une sélection qui dispute la Coupe du Monde DANS son propre pays bénéficie d'un
+# avantage réel et documenté (public massif, familiarité, longue préparation) :
+# historiquement les hôtes surperforment nettement leur classement. On le modélise
+# par un bonus FIXE ajouté aux buts attendus de l'hôte, distinct de l'avantage du
+# terrain habituel (`home_adv`) et CUMULABLE même en « terrain neutre » (toute la
+# Coupe du Monde est jouée sur terrain neutre au sens du modèle).
+#
+# Valeur retenue : bonus en log-buts = 0,30, soit exp(0,30) ≈ +35 % de buts attendus
+# pour l'hôte. Ordre de grandeur volontairement calé sur l'avantage du terrain mesuré
+# par le modèle lui-même (home_adv ≈ 0,27 → +31 %) : un hôte joue de fait « à domicile ».
+# Choisi A PRIORI (jamais ajusté sur les résultats) pour rester sans fuite.
+# Hôtes 2026 : États-Unis, Canada, Mexique (noms canoniques de la base).
+WORLD_CUP_COMPETITION = "FIFA World Cup"
+WORLD_CUP_HOSTS = {"United States", "Canada", "Mexico"}
+HOST_GOAL_LOG_BONUS = float(os.environ.get("HOST_GOAL_LOG_BONUS", "0.30"))
+
 # --- Backtest de PARIS (Phase P1) ------------------------------------------
 # Métrique de vérité : battre le bookmaker en simulation chronologique anti-fuite.
 # Edge minimal requis pour parier : (prob_modèle * cote) - 1 > seuil.

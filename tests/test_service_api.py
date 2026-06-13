@@ -23,10 +23,19 @@ def test_predict_contract_complete():
 
 
 def test_neutral_lowers_home_prob_via_service():
+    """Le terrain neutre retire l'avantage du domicile.
+
+    Invariant MÉCANIQUE (toujours vrai) : jouer à domicile accroît les buts
+    attendus de l'équipe à domicile. Et pour un FAVORI à domicile, passer en
+    terrain neutre fait bien BAISSER sa probabilité de victoire. (On prend un
+    favori clair : pour une équipe à parité, la calibration domicile/extérieur
+    et la symétrisation du terrain neutre peuvent se croiser — cf. doc Étape 2.)
+    """
     from pipeline import service
-    home = service.predict("FIFA World Cup", "France", "Brazil", neutral=False)["p_home_win"]
-    neut = service.predict("FIFA World Cup", "France", "Brazil", neutral=True)["p_home_win"]
-    assert home > neut
+    nn = service.predict("Friendly", "Brazil", "Paraguay", neutral=False)
+    nu = service.predict("Friendly", "Brazil", "Paraguay", neutral=True)
+    assert nn["exp_home_goals"] > nu["exp_home_goals"]   # mécanique, toujours vrai
+    assert nn["p_home_win"] > nu["p_home_win"]           # favori : le neutre le pénalise
 
 
 def test_unknown_team_raises():
@@ -267,6 +276,52 @@ def test_pwa_assets_served():
     assert "addEventListener" in sw.text
     # le SW ne doit jamais mettre en cache les appels /api/
     assert "/api/" in sw.text
+
+
+def test_model_separates_strong_from_weak_nations():
+    """Anti-aplatissement : une grande nation contre une petite doit montrer un
+    écart NET de buts attendus (le modèle ne ramène pas tout vers ~1,8-1,8)."""
+    from pipeline import service
+    p = service.predict("FIFA World Cup", "France", "Gibraltar", neutral=True)
+    assert p["exp_home_goals"] - p["exp_away_goals"] >= 2.0   # écart franc
+    assert p["p_home_win"] > 0.85                              # favori écrasant
+
+
+def test_world_cup_host_bonus_tips_and_is_visible():
+    """Effet pays hôte : USA-Paraguay en Coupe du Monde penche désormais pour les
+    USA, l'effet est exposé, et il n'existe PAS hors Coupe du Monde."""
+    from pipeline import service
+    wc = service.predict("FIFA World Cup", "United States", "Paraguay", neutral=True)
+    assert wc["p_home_win"] > wc["p_away_win"]                 # l'hôte est favori
+    assert wc.get("host_effect", {}).get("team") == "United States"
+    assert wc["host_effect"]["goal_boost_pct"] > 0
+    # hôte mentionné dans l'explication factuelle
+    assert any("hôte" in f for f in wc["why"]["factors"])
+    # même affiche en amical : aucun effet hôte (réservé à la Coupe du Monde)
+    fr = service.predict("Friendly", "United States", "Paraguay", neutral=True)
+    assert "host_effect" not in fr
+
+
+def test_host_bonus_only_for_hosts_and_bounded():
+    """Le bonus hôte ne flippe pas un net favori adverse, et deux co-hôtes ne
+    se l'attribuent pas (aucun avantage différentiel)."""
+    from pipeline import service
+    vs_strong = service.predict("FIFA World Cup", "United States", "Brazil", neutral=True)
+    assert vs_strong["p_away_win"] > vs_strong["p_home_win"]   # Brésil reste favori
+    co_hosts = service.predict("FIFA World Cup", "Mexico", "Canada", neutral=True)
+    assert "host_effect" not in co_hosts                       # deux hôtes -> neutre
+
+
+def test_neutral_prediction_is_swap_invariant():
+    """Terrain neutre : l'étiquette domicile/extérieur est arbitraire, donc
+    p_home(H vs A) == p_away(A vs H) à l'arrondi près (symétrie indispensable
+    pour une Coupe du Monde jouée intégralement sur terrain neutre)."""
+    from pipeline import service
+    a = service.predict("FIFA World Cup", "United States", "Paraguay", neutral=True)
+    b = service.predict("FIFA World Cup", "Paraguay", "United States", neutral=True)
+    assert abs(a["p_home_win"] - b["p_away_win"]) < 0.02
+    assert abs(a["p_away_win"] - b["p_home_win"]) < 0.02
+    assert abs(a["p_draw"] - b["p_draw"]) < 0.02
 
 
 def test_prediction_cache_hit_and_invalidation():
