@@ -33,7 +33,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from . import config, db, features, refresh, service, train
+from . import config, db, features, journal, refresh, service, train
 
 log = logging.getLogger("pipeline.refresh_job")
 
@@ -104,12 +104,20 @@ def _do_data(result: dict) -> None:
     try:
         summary = refresh.refresh(use_cache=False, quick=True)
         feats = features.build_all()
+        # Apprentissage : régler les prédictions en attente dont le résultat est connu.
+        # Best-effort : un souci de journal ne doit jamais faire échouer la mise à jour.
+        try:
+            settled = journal.settle_pending()
+        except Exception as e:  # noqa: BLE001
+            log.warning("règlement des prédictions ignoré : %s", e)
+            settled = 0
         result["state"] = "done"
         result["message"] = (
             f"Données rafraîchies : {summary.get('clubs', 0)} matchs clubs, "
             f"{summary.get('internationals', 0)} sélections, "
             f"{summary.get('fixtures', 0)} matchs à venir ; "
-            f"features clubs={feats.get('club', 0)}, intl={feats.get('international', 0)}.")
+            f"features clubs={feats.get('club', 0)}, intl={feats.get('international', 0)}"
+            + (f" ; {settled} prédiction(s) réglée(s)." if settled else "."))
     except Exception as e:  # noqa: BLE001 — jamais de crash, on remonte l'erreur
         log.exception("Phase données en échec")
         result["state"] = "error"

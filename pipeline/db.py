@@ -177,6 +177,34 @@ CREATE TABLE IF NOT EXISTS intl_scorers (
     last_date   TEXT,
     PRIMARY KEY (team_id, player_name)
 );
+-- Apprentissage par l'expérience : journal des prédictions (Phase 1).
+-- PERSISTANT (jamais réinitialisé) : une prédiction est enregistrée AVANT que le
+-- résultat soit connu (statut 'pending'), puis 'réglée' quand le vrai score arrive.
+CREATE TABLE IF NOT EXISTS predictions_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at      TEXT NOT NULL,
+    model_version   TEXT NOT NULL,
+    domain          TEXT NOT NULL,
+    competition     TEXT NOT NULL,
+    home_team_id    TEXT NOT NULL,
+    away_team_id    TEXT NOT NULL,
+    match_date      TEXT NOT NULL,
+    neutral         INTEGER NOT NULL DEFAULT 0,
+    use_qualitative INTEGER NOT NULL DEFAULT 0,
+    p_home REAL NOT NULL, p_draw REAL NOT NULL, p_away REAL NOT NULL,
+    exp_home_goals REAL, exp_away_goals REAL,
+    ml_home INTEGER, ml_away INTEGER,
+    market_home REAL, market_draw REAL, market_away REAL,
+    status          TEXT NOT NULL DEFAULT 'pending',   -- pending | settled
+    settled_at      TEXT,
+    actual_home_goals INTEGER, actual_away_goals INTEGER,
+    outcome           INTEGER,   -- 0 dom / 1 nul / 2 ext
+    predicted_outcome INTEGER,
+    correct_1x2       INTEGER,
+    brier REAL, rps REAL, clv REAL,
+    UNIQUE (model_version, domain, home_team_id, away_team_id, match_date,
+            neutral, use_qualitative)
+);
 """
 
 

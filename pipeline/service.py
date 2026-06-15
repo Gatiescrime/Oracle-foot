@@ -19,7 +19,7 @@ import pandas as pd
 
 from datetime import datetime, timedelta, timezone
 
-from . import badges, config, db, devig, features
+from . import badges, config, db, devig, features, journal
 from . import names as names_mod
 from . import odds_api, scorers, staking
 from .qualitative import QualitativeLayer
@@ -317,6 +317,10 @@ def predict(competition: str, home: str, away: str, neutral: bool = False,
         }
     # État EFFECTIF de la couche pour cette requête (l'UI affiche le bon panneau).
     pred["qualitative_enabled"] = effective
+
+    # Journal des prédictions (apprentissage) : enregistré AVANT que le résultat soit
+    # connu, uniquement pour un vrai match à venir. Best-effort, ne casse rien.
+    journal.maybe_log(pred, domain, competition, hid, aid, neutral, effective)
 
     if cache_key is not None:
         if len(_PRED_CACHE) >= _PRED_CACHE_MAX:
@@ -986,3 +990,4 @@ def clear_caches() -> None:
     _PRED_CACHE.clear()
     _UPCOMING_CACHE.update({"at": 0.0, "days": None, "data": None})
     _VALUE_CACHE.update({"at": 0.0, "days": None, "data": None})
+    journal.clear_version_cache()      # la version de modèle change au réentraînement

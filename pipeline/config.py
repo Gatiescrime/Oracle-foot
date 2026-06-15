@@ -102,6 +102,12 @@ QUICK_HTTP_RETRIES = int(os.environ.get("QUICK_HTTP_RETRIES", "1"))
 REFRESH_DATA_TIMEOUT_S = float(os.environ.get("REFRESH_DATA_TIMEOUT_S", "60"))
 REFRESH_TRAIN_TIMEOUT_S = float(os.environ.get("REFRESH_TRAIN_TIMEOUT_S", "480"))
 
+# --- Apprentissage par l'expérience : journal des prédictions (Phase 1) ----
+# Journalise chaque prédiction rattachable à un vrai match du calendrier, AVANT que
+# le résultat soit connu (anti-fuite), pour mesurer ensuite la performance réelle.
+PREDICTION_LOG_ENABLED = os.environ.get(
+    "PREDICTION_LOG_ENABLED", "true").strip().lower() == "true"
+
 # --- Ligues de clubs -------------------------------------------------------
 # Chaque ligue relie le code football-data, le code understat et un libellé commun.
 # competition = libellé canonique stocké dans la base (identique côté matches).
