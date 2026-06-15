@@ -125,6 +125,35 @@ def test_settlement_fills_result_and_metrics(temp_db):
     assert journal.settle_pending() == 0
 
 
+def test_live_track_record_aggregates(temp_db):
+    conn = db.connect()
+    for i, (h, a) in enumerate([("n_a", "n_b"), ("n_c", "n_d"), ("n_e", "n_f")]):
+        _team(conn, h, h); _team(conn, a, a)
+        _fixture(conn, h, a, f"2026-06-2{i}")
+    conn.commit(); conn.close()
+    for h, a in [("n_a", "n_b"), ("n_c", "n_d"), ("n_e", "n_f")]:
+        journal.maybe_log(PRED, config.DOMAIN_INTL, "FIFA World Cup", h, a, True, False)
+
+    # rien de réglé encore -> non disponible, mais 3 en attente
+    lt = journal.live_track_record()
+    assert lt["available"] is False and lt["n_pending"] == 3
+
+    # deux matchs joués (un favori gagne, un favori perd)
+    conn = db.connect()
+    _played(conn, "n_a", "n_b", "2026-06-20", 2, 0)   # dom gagne -> 1X2 correct
+    _played(conn, "n_c", "n_d", "2026-06-21", 0, 2)   # ext gagne -> 1X2 faux
+    conn.commit(); conn.close()
+    assert journal.settle_pending() == 2
+
+    lt = journal.live_track_record()
+    assert lt["available"] is True
+    assert lt["n_settled"] == 2 and lt["n_pending"] == 1
+    assert lt["accuracy"] == 0.5                       # 1 bon / 2
+    assert lt["rps"] is not None and lt["brier"] is not None
+    assert lt["calibration"] and lt["by_competition"][0]["competition"] == "FIFA World Cup"
+    assert lt["by_competition"][0]["n"] == 2
+
+
 def test_disabled_flag_skips_logging(temp_db, monkeypatch):
     monkeypatch.setattr(config, "PREDICTION_LOG_ENABLED", False)
     conn = db.connect()

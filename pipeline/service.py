@@ -960,14 +960,24 @@ def track_record() -> dict:
     import os
 
     path = os.path.join(config.ROOT, "data", "backtest_result.json")
-    if not os.path.exists(path):
-        return {"available": False}
+    backtest = None
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                backtest = json.load(fh)
+        except (OSError, ValueError):
+            backtest = None
+
+    # Performance RÉELLE issue du journal des prédictions (distincte du backtest).
     try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, ValueError):
-        return {"available": False}
-    return {"available": True, **data}
+        live = journal.live_track_record()
+    except Exception:  # noqa: BLE001
+        live = {"available": False}
+
+    out = {"available": backtest is not None, "live": live}
+    if backtest is not None:
+        out.update(backtest)
+    return out
 
 
 def qualitative_status() -> dict:

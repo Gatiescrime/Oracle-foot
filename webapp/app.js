@@ -659,7 +659,58 @@ function calibrationTable(rows) {
   return `<table class="odds"><thead><tr><th>Le modèle annonce…</th><th>…ça arrive</th><th>Matchs</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
+function renderLiveTrackRecord(live) {
+  // Historique RÉEL des prédictions (journal), clairement distingué du backtest.
+  if (!live || !live.available) {
+    const pend = (live && live.n_pending) || 0;
+    return `<div class="panel" style="border-color:rgba(43,213,118,0.25)">
+      <h3 class="block-title">Historique réel des prédictions</h3>
+      <p class="track-note" style="margin-top:0">Pas encore de prédiction évaluée. Les
+      matchs analysés et présents au calendrier sont enregistrés, puis notés
+      automatiquement une fois joués.${pend ? ` <strong>${intFmt(pend)}</strong> en attente de résultat.` : ""}</p>
+    </div>`;
+  }
+  const period = (live.since && live.until)
+    ? `du ${live.since} au ${live.until}` : "";
+  const clv = (live.clv_mean != null)
+    ? `<div class="metric"><span class="m-label">CLV moyen <span class="info" tabindex="0" role="note" aria-label="Closing Line Value : cote captée vs cote de clôture. Positif = on a pris un meilleur prix que le marché final.">i</span></span><span class="m-value">${(live.clv_mean >= 0 ? "+" : "") + (live.clv_mean * 100).toFixed(1)}%</span></div>`
+    : "";
+  const roi = (live.roi != null)
+    ? `<div class="metric"><span class="m-label">ROI (paris à plat, cotes captées)</span><span class="m-value">${(live.roi >= 0 ? "+" : "") + (live.roi * 100).toFixed(1)}%</span></div>`
+    : "";
+  const byComp = (live.by_competition || []).length
+    ? `<h4 class="track-sub">Par compétition</h4>
+       <table class="odds"><thead><tr><th>Compétition</th><th class="num">Prédictions</th><th class="num">Réussite 1X2</th><th class="num">RPS</th></tr></thead>
+       <tbody>${live.by_competition.map((c) =>
+         `<tr><td>${esc(c.competition)}</td><td class="num">${intFmt(c.n)}</td><td class="num">${pct(c.accuracy)}</td><td class="num">${f3(c.rps)}</td></tr>`).join("")}</tbody></table>`
+    : "";
+  const overTime = (live.over_time || []).length > 1
+    ? `<h4 class="track-sub">RPS dans le temps</h4>
+       <p class="track-note" style="margin-top:0">${live.over_time.map((p) =>
+         `${p.period} : <strong>${f3(p.rps)}</strong> (${intFmt(p.n)})`).join(" · ")}</p>`
+    : "";
+  return `<div class="panel" style="border-color:rgba(43,213,118,0.25)">
+    <h3 class="block-title">Historique réel des prédictions <span class="info" tabindex="0" role="note" aria-label="Performance mesurée sur les prédictions réellement faites par le site, notées après coup. À distinguer du backtest ci-dessous, qui rejoue l'histoire.">i</span></h3>
+    <p class="track-note" style="margin-top:0">Performance des prédictions <strong>réellement faites par le site</strong>, notées après coup ${period}. Différent du <em>backtest</em> ci-dessous (qui rejoue l'histoire). ${intFmt(live.n_pending)} en attente de résultat.</p>
+    <div class="metrics">
+      <div class="metric"><span class="m-label">Prédictions évaluées</span><span class="m-value">${intFmt(live.n_settled)}</span></div>
+      <div class="metric"><span class="m-label">Réussite 1X2 <span class="info" tabindex="0" role="note" aria-label="Part des matchs où l'issue la plus probable selon le modèle s'est réalisée.">i</span></span><span class="m-value">${pct(live.accuracy)}</span></div>
+      <div class="metric"><span class="m-label">RPS réel</span><span class="m-value">${f3(live.rps)}</span></div>
+      <div class="metric"><span class="m-label">Score de Brier</span><span class="m-value">${f3(live.brier)}</span></div>
+      ${clv}${roi}
+    </div>
+    ${byComp}${overTime}
+    <h4 class="track-sub">Calibration (prédictions réelles)</h4>
+    ${calibrationTable(live.calibration)}
+  </div>`;
+}
+
 function renderTrackRecord(data) {
+  const live = renderLiveTrackRecord(data.live);
+  if (!data.available) {
+    return live +
+      `<p class="track-note" style="text-align:center">Le backtest historique n'est pas encore généré (<code>python -m pipeline.backtest</code>).</p>`;
+  }
   const club = data.club || {};
   const intl = data.international || {};
   const vb = club.value_betting || {};
@@ -703,7 +754,9 @@ function renderTrackRecord(data) {
       ${calibrationTable(intl.calibration)}
     </div>`;
 
-  return intro + clubPanel + intlPanel +
+  const backtestIntro =
+    `<h3 class="block-title" style="margin-top:8px">Backtest historique (walk-forward)</h3>`;
+  return live + backtestIntro + intro + clubPanel + intlPanel +
     `<p class="track-note" style="text-align:center">Reproductible : <code>python -m pipeline.backtest</code>. Les probabilités sont des estimations, pas des certitudes.</p>`;
 }
 
@@ -713,8 +766,8 @@ async function loadTrackRecord(force) {
   host.innerHTML = '<p style="color:var(--muted)">Chargement…</p>';
   try {
     const data = await api("/api/track-record");
-    if (!data.available) {
-      host.innerHTML = '<p style="color:var(--muted)">Backtest non disponible. Lance <code>python -m pipeline.backtest</code> pour générer les chiffres.</p>';
+    if (!data.available && !(data.live && data.live.available)) {
+      host.innerHTML = '<p style="color:var(--muted)">Aucun historique pour le moment. Lance <code>python -m pipeline.backtest</code> pour le backtest ; l\'historique réel se remplit au fil des matchs prédits puis joués.</p>';
       return;
     }
     TRACK_LOADED = true;

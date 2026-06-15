@@ -24,6 +24,8 @@ import logging
 import os
 from datetime import datetime, timezone
 
+import numpy as np
+
 from . import config, db, metrics
 
 log = logging.getLogger("pipeline.journal")
@@ -152,6 +154,90 @@ def settle_pending(conn=None) -> int:
         if own:
             conn.close()
     return settled
+
+
+def _agg(rows: list) -> dict:
+    """Métriques agrégées d'un lot de prédictions réglées."""
+    probs = np.array([[r["p_home"], r["p_draw"], r["p_away"]] for r in rows], dtype=float)
+    outs = np.array([r["outcome"] for r in rows], dtype=int)
+    rpss = [r["rps"] for r in rows if r["rps"] is not None]
+    briers = [r["brier"] for r in rows if r["brier"] is not None]
+    clvs = [r["clv"] for r in rows if r["clv"] is not None]
+    out = {
+        "n": len(rows),
+        "accuracy": round(sum(r["correct_1x2"] for r in rows) / len(rows), 4),
+        "rps": round(float(np.mean(rpss)), 4) if rpss else None,
+        "brier": round(float(np.mean(briers)), 4) if briers else None,
+    }
+    if clvs:
+        out["clv_mean"] = round(float(np.mean(clvs)), 4)
+        out["clv_n"] = len(clvs)
+        out["clv_beat_rate"] = round(float(np.mean([1.0 if c > 0 else 0.0 for c in clvs])), 4)
+    # ROI : pari à plat sur l'issue prédite, à la cote captée (si dispo). Sinon None.
+    staked = profit = 0.0
+    for r in rows:
+        odd = [r["market_home"], r["market_draw"], r["market_away"]][r["predicted_outcome"]]
+        if odd and odd > 1.0:
+            staked += 1.0
+            profit += (float(odd) - 1.0) if r["correct_1x2"] else -1.0
+    if staked > 0:
+        out["roi"] = round(profit / staked, 4)
+        out["roi_n_bets"] = int(staked)
+    return out
+
+
+def live_track_record(conn=None) -> dict:
+    """Performance RÉELLE issue du journal (prédictions réglées) — pour la page
+    Track record. Agrège : taux de réussite 1X2, RPS, Brier, calibration, RPS dans le
+    temps (par mois), et par compétition ; ROI/CLV si des cotes ont été captées.
+    """
+    own = conn is None
+    conn = conn or db.connect()
+    try:
+        settled = conn.execute(
+            "SELECT * FROM predictions_log WHERE status='settled'").fetchall()
+        n_pending = conn.execute(
+            "SELECT COUNT(*) FROM predictions_log WHERE status='pending'").fetchone()[0]
+    finally:
+        if own:
+            conn.close()
+
+    if not settled:
+        return {"available": False, "n_settled": 0, "n_pending": int(n_pending)}
+
+    probs = np.array([[r["p_home"], r["p_draw"], r["p_away"]] for r in settled], dtype=float)
+    outs = np.array([r["outcome"] for r in settled], dtype=int)
+
+    # Par compétition (trié par effectif décroissant).
+    comps: dict[str, list] = {}
+    for r in settled:
+        comps.setdefault(r["competition"], []).append(r)
+    by_competition = sorted(
+        [{"competition": c, **_agg(rs)} for c, rs in comps.items()],
+        key=lambda d: d["n"], reverse=True)
+
+    # RPS dans le temps : par mois (date du match).
+    months: dict[str, list] = {}
+    for r in settled:
+        months.setdefault((r["match_date"] or "")[:7], []).append(r)
+    over_time = [
+        {"period": m, "n": len(rs),
+         "rps": round(float(np.mean([x["rps"] for x in rs if x["rps"] is not None])), 4)
+         if any(x["rps"] is not None for x in rs) else None}
+        for m, rs in sorted(months.items()) if m]
+
+    dates = sorted(r["match_date"] for r in settled if r["match_date"])
+    return {
+        "available": True,
+        "n_settled": len(settled),
+        "n_pending": int(n_pending),
+        "since": dates[0] if dates else None,
+        "until": dates[-1] if dates else None,
+        **_agg(settled),
+        "calibration": metrics.calibration_table(probs, outs),
+        "by_competition": by_competition,
+        "over_time": over_time,
+    }
 
 
 def _clv(row, match, pred_out: int) -> float | None:
