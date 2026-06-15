@@ -34,7 +34,12 @@ def _data_home() -> str:
 
 # --- Chemins ---------------------------------------------------------------
 ROOT = _resource_root()                            # ressources livrées (lecture)
-DATA_DIR = os.path.join(_data_home(), "data")      # données inscriptibles
+# Données INSCRIPTIBLES (base, modèles, cache, journal d'apprentissage). On peut les
+# rediriger vers un VOLUME PERSISTANT via la variable d'environnement
+# PREDICT_FOOT_DATA_DIR (ex. sur Render : un disque persistant monté sur /var/data) :
+# la mémoire (journal des prédictions) survit alors aux redéploiements. Sans cette
+# variable, comportement inchangé (données dans le dépôt en dev, ~/PredictFoot en exe).
+DATA_DIR = os.environ.get("PREDICT_FOOT_DATA_DIR") or os.path.join(_data_home(), "data")
 RESOURCE_DATA_DIR = os.path.join(ROOT, "data")     # données livrées dans le bundle
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
 DB_PATH = os.path.join(DATA_DIR, "football.db")
@@ -59,9 +64,13 @@ except ImportError:
 def seed_writable_data() -> None:
     """Recopie la base et les modèles livrés vers le dossier inscriptible (1re exécution).
 
-    Utile uniquement en exécutable empaqueté : les ressources du bundle (lecture seule)
-    amorcent `~/PredictFoot/data` pour que l'app fonctionne hors ligne dès le 1er lancement.
-    Sans effet en développement (les deux chemins sont identiques).
+    Deux cas où `DATA_DIR` diffère des ressources livrées :
+      - exécutable empaqueté (`~/PredictFoot/data`) ;
+      - **volume persistant** redirigé via `PREDICT_FOOT_DATA_DIR` (ex. disque Render).
+    Dans ces cas, on amorce le volume (base + modèles) à partir du bundle au 1er
+    démarrage, pour que l'app fonctionne immédiatement ; le journal d'apprentissage
+    s'y accumule ensuite et **survit aux redéploiements**. Sans effet en développement
+    (les deux chemins sont identiques) — appel idempotent.
     """
     import shutil
 
@@ -77,6 +86,15 @@ def seed_writable_data() -> None:
             dst = os.path.join(MODELS_DIR, f)
             if not os.path.exists(dst):
                 shutil.copy2(os.path.join(src_models, f), dst)
+
+
+# Amorçage automatique d'un volume persistant redirigé (idempotent ; no-op en dev).
+# Permet à l'app web (Render + disque persistant) de démarrer sur des données fraîches
+# tout en conservant le journal d'apprentissage d'un déploiement à l'autre.
+try:
+    seed_writable_data()
+except Exception:  # noqa: BLE001 — l'amorçage ne doit jamais empêcher le démarrage
+    pass
 
 # --- Réseau ----------------------------------------------------------------
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (football-model)"

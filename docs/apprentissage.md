@@ -65,7 +65,46 @@ sous-confiantes**, la boucle apprend un **T < 1**, le **conserve** (amélioratio
 validée hors échantillon) et reste **borné** ; sur des prédictions bien calibrées,
 elle ne conserve rien.
 
+## Honnêteté & limites (Phase 4)
+
+À dire clairement, sans survendre :
+
+- La correction **améliore la calibration** (l'accord entre « X % annoncé » et « X %
+  observé »), elle **ne garantit aucun gain**. Mieux calibré ≠ rentable : sur les
+  clubs, le bookmaker reste devant (cf. Track record).
+- Elle est **bornée** (T ∈ [0,70 ; 1,40]) et **validée hors échantillon** :
+  c'est précisément ce qui **évite le surapprentissage**. Si elle n'aide pas en
+  validation, elle **n'est pas appliquée** (T=1). Aujourd'hui, sur nos données, elle
+  est **inactive** (le modèle est déjà bien calibré) — et c'est honnête de le dire.
+- Une « value » ou une prédiction reste une **estimation**, jamais une certitude. Le
+  site n'incite à aucune mise garantie.
+
+## Persistance & hébergement (Phase 4)
+
+La mémoire (journal des prédictions + correction) vit dans **`football.db`** : c'est
+un simple fichier.
+
+- **En local** : le fichier persiste sur le disque → la mémoire **survit aux
+  redémarrages** de l'application **et** aux mises à jour des données (la table
+  `predictions_log` est dans le schéma persistant, donc **non effacée** par un
+  refresh). Vérifié par un test dédié.
+- **Sur Render (offre gratuite)** : le disque est **éphémère** — il est **réinitialisé
+  à chaque redéploiement**. La mémoire ne survivrait donc PAS à un redéploiement. Pour
+  une mémoire durable en ligne, deux options (aucune imposée) :
+  1. **La plus simple — un disque persistant** : attacher un *Persistent Disk* au
+     service (offre payante de Render), le monter (ex. `/var/data`) et pointer l'app
+     dessus avec la variable d'environnement **`PREDICT_FOOT_DATA_DIR=/var/data`**.
+     L'app **amorce automatiquement** ce volume (base + modèles livrés) au premier
+     démarrage, puis y accumule le journal qui **survit aux redéploiements**.
+  2. **Une base externe** (ex. Postgres managé) : plus robuste mais demande une
+     migration du stockage — surdimensionné pour l'usage actuel.
+- **Recommandation honnête** : pour l'apprentissage par l'expérience, l'**usage local**
+  (ou un petit disque persistant) suffit largement ; inutile de complexifier tant que
+  le volume de prédictions reste modeste.
+
 ## Ce qui a changé dans le code
+- `pipeline/config.py` : `PREDICT_FOOT_DATA_DIR` (redirige les données inscriptibles vers
+  un volume persistant) + amorçage automatique idempotent du volume.
 - `pipeline/correction.py` (nouveau) : `temper`, `fit_domain` (apprentissage + validation
   chronologique), `refit_from_journal`, `apply_to_pred`, persistance.
 - `pipeline/service.py` : applique la correction APRÈS journalisation des probas brutes.
@@ -76,7 +115,10 @@ elle ne conserve rien.
 `tests/test_correction.py` : détection + correction d'une sous-confiance (T<1 conservé,
 amélioration hors échantillon) ; aucune correction si déjà bien calibré ; **rejet** d'un
 T qui n'aide pas la validation ; **bornes** respectées même sur biais extrême ; données
-insuffisantes ⇒ désactivée ; **réversibilité** (drapeau / T=1). **Suite : 222 tests verts.**
+insuffisantes ⇒ désactivée ; **réversibilité** (drapeau / T=1) ; **idempotence** et
+**robustesse** (un état corrompu ne casse jamais une prédiction). Côté journal,
+`test_journal_survives_refresh_and_restart` prouve que la mémoire **survit à un refresh
+et à un redémarrage**. **Suite : 225 tests verts.**
 
 ## Critère d'acceptation — atteint
 ✅ Détection de biais systématiques à partir du journal (sous/sur-confiance)
@@ -84,3 +126,6 @@ insuffisantes ⇒ désactivée ; **réversibilité** (drapeau / T=1). **Suite : 
 ✅ Sur backtest : modèle + correction **ne fait pas pire** (identique ici, le garde-fou refuse)
 ✅ **Anti-boucle** (ensemble des erreurs accumulées, probas brutes) et **réversible**
 ✅ Réentraînement existant conservé en parallèle
+✅ **Honnêteté** : améliore la calibration, **pas un gain garanti** ; bornée/validée (anti-surapprentissage)
+✅ **Persistance** : mémoire durable en local (survit refresh + redémarrage, testé) ;
+   disque Render éphémère documenté + option simple (`PREDICT_FOOT_DATA_DIR` → volume persistant)

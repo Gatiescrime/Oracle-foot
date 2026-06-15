@@ -154,6 +154,25 @@ def test_live_track_record_aggregates(temp_db):
     assert lt["by_competition"][0]["n"] == 2
 
 
+def test_journal_survives_refresh_and_restart(temp_db):
+    """Persistance : le journal vit dans `football.db` et survit à un REFRESH
+    (reset_schema reconstruit matches/fixtures mais PAS predictions_log) ET à un
+    REDÉMARRAGE (nouvelle connexion au même fichier)."""
+    conn = db.connect()
+    _team(conn, "n_a", "A"); _team(conn, "n_b", "B")
+    _fixture(conn, "n_a", "n_b", "2026-06-20")
+    conn.commit(); conn.close()
+    journal.maybe_log(PRED, config.DOMAIN_INTL, "FIFA World Cup", "n_a", "n_b", True, False)
+
+    # refresh : on reconstruit le schéma volatil
+    conn = db.connect(); db.reset_schema(conn); conn.commit(); conn.close()
+    # redémarrage : nouvelle connexion au même fichier
+    conn = db.connect()
+    n = conn.execute("SELECT COUNT(*) FROM predictions_log").fetchone()[0]
+    conn.close()
+    assert n == 1            # la mémoire a survécu au refresh ET au redémarrage
+
+
 def test_disabled_flag_skips_logging(temp_db, monkeypatch):
     monkeypatch.setattr(config, "PREDICTION_LOG_ENABLED", False)
     conn = db.connect()
