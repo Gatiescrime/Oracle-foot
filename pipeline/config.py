@@ -107,6 +107,11 @@ REFRESH_TRAIN_TIMEOUT_S = float(os.environ.get("REFRESH_TRAIN_TIMEOUT_S", "480")
 # le résultat soit connu (anti-fuite), pour mesurer ensuite la performance réelle.
 PREDICTION_LOG_ENABLED = os.environ.get(
     "PREDICTION_LOG_ENABLED", "true").strip().lower() == "true"
+# Boucle de correction (Phase 3) : applique une correction BORNÉE, apprise du journal
+# et VALIDÉE hors échantillon, aux prochaines prédictions. Réversible : à false, ou si
+# aucune correction n'a été validée, la prédiction est strictement inchangée.
+CORRECTION_ENABLED = os.environ.get(
+    "CORRECTION_ENABLED", "true").strip().lower() == "true"
 
 # --- Ligues de clubs -------------------------------------------------------
 # Chaque ligue relie le code football-data, le code understat et un libellé commun.

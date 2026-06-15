@@ -26,6 +26,8 @@ data/*.log
 data/*_result.json
 # Exception : le résultat du backtest alimente la page Track record en ligne -> versionné.
 !data/backtest_result.json
+# Correction apprise du journal : état runtime régénéré à chaque refresh (non versionné).
+data/models/correction.json
 
 # Artefacts de build PyInstaller
 build/

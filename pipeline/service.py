@@ -19,7 +19,7 @@ import pandas as pd
 
 from datetime import datetime, timedelta, timezone
 
-from . import badges, config, db, devig, features, journal
+from . import badges, config, correction, db, devig, features, journal
 from . import names as names_mod
 from . import odds_api, scorers, staking
 from .qualitative import QualitativeLayer
@@ -319,8 +319,14 @@ def predict(competition: str, home: str, away: str, neutral: bool = False,
     pred["qualitative_enabled"] = effective
 
     # Journal des prédictions (apprentissage) : enregistré AVANT que le résultat soit
-    # connu, uniquement pour un vrai match à venir. Best-effort, ne casse rien.
+    # connu, sur les probas BRUTES (anti-boucle : la correction s'apprend dessus, sans
+    # rétroaction). Best-effort, ne casse rien.
     journal.maybe_log(pred, domain, competition, hid, aid, neutral, effective)
+
+    # Couche de correction (Phase 3) : ajustement BORNÉ et VALIDÉ appris du journal,
+    # appliqué APRÈS la journalisation (donc jamais réinjecté dans son propre
+    # apprentissage). Sans correction validée -> prédiction inchangée.
+    correction.apply_to_pred(pred, domain)
 
     if cache_key is not None:
         if len(_PRED_CACHE) >= _PRED_CACHE_MAX:
@@ -1001,3 +1007,4 @@ def clear_caches() -> None:
     _UPCOMING_CACHE.update({"at": 0.0, "days": None, "data": None})
     _VALUE_CACHE.update({"at": 0.0, "days": None, "data": None})
     journal.clear_version_cache()      # la version de modèle change au réentraînement
+    correction.clear_cache()           # la correction est recalculée à chaque refresh

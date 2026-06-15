@@ -33,7 +33,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from . import config, db, features, journal, refresh, service, train
+from . import config, correction, db, features, journal, refresh, service, train
 
 log = logging.getLogger("pipeline.refresh_job")
 
@@ -104,13 +104,19 @@ def _do_data(result: dict) -> None:
     try:
         summary = refresh.refresh(use_cache=False, quick=True)
         feats = features.build_all()
-        # Apprentissage : régler les prédictions en attente dont le résultat est connu.
-        # Best-effort : un souci de journal ne doit jamais faire échouer la mise à jour.
+        # Apprentissage : régler les prédictions en attente dont le résultat est connu,
+        # puis recalculer la correction bornée (validée hors échantillon) sur TOUTES les
+        # erreurs accumulées. Best-effort : un souci ne doit jamais faire échouer la MAJ.
         try:
             settled = journal.settle_pending()
+            correction.refit_from_journal()
         except Exception as e:  # noqa: BLE001
-            log.warning("règlement des prédictions ignoré : %s", e)
+            log.warning("apprentissage (journal/correction) ignoré : %s", e)
             settled = 0
+        # Note : la nouvelle correction prend effet à la FINALISATION du job, quand
+        # `service.clear_caches()` vide le cache de prédiction en même temps que les
+        # données fraîches (la mise à jour est « atomique » du point de vue de l'app :
+        # l'état pré-refresh est servi tant que le job n'est pas terminé).
         result["state"] = "done"
         result["message"] = (
             f"Données rafraîchies : {summary.get('clubs', 0)} matchs clubs, "

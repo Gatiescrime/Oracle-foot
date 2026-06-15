@@ -11,5 +11,8 @@ from pipeline import config
 
 
 @pytest.fixture(autouse=True)
-def _disable_prediction_log(monkeypatch):
+def _disable_learning_side_effects(monkeypatch):
+    # Journal : éviter d'écrire dans la vraie base pendant les tests.
     monkeypatch.setattr(config, "PREDICTION_LOG_ENABLED", False)
+    # Correction : prédictions déterministes quel que soit un correction.json présent.
+    monkeypatch.setattr(config, "CORRECTION_ENABLED", False)
