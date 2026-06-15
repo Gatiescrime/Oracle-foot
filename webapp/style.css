@@ -213,6 +213,7 @@ option { background: #0c1322; }
 .metric { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 14px 16px; backdrop-filter: blur(10px); }
 .m-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .m-value { display: block; font-size: 22px; font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.m-note { display: block; font-size: 11px; color: var(--faint); margin-top: 2px; }
 
 /* actu */
 .actu .fact { padding: 10px 0; border-top: 1px solid var(--line); }

@@ -44,6 +44,8 @@ document.addEventListener("error", (e) => {
 }, true);
 let COMPS = { club: [], international: [] };
 let LASTPRED = null;
+let LOADED_DOMAIN = null;   // domaine dont les équipes sont actuellement chargées
+let NAV_RESTORING = false;  // true pendant une restauration via le bouton retour
 // Équipes du domaine courant : maps pour la recherche par saisie (typeahead datalist).
 let TEAM_NAME = {};     // id -> nom affichable
 let TEAM_ID = {};       // nom (minuscule) -> id
@@ -75,6 +77,9 @@ async function init() {
     setStatus("Impossible de charger les compétitions : " + e.message, true);
   }
   bindUI();
+  // État d'historique initial : la vue « Analyser » (formulaire vide). Le retour
+  // depuis un résultat ramènera donc proprement au formulaire.
+  history.replaceState({ view: "predict" }, "");
   loadMeta();
   loadFixtures();
 }
@@ -114,6 +119,7 @@ async function loadTeams() {
     const byElo = teams.slice().sort((a, b) => (b.elo || 0) - (a.elo || 0));
     $("home").value = byElo[0] ? byElo[0].name : "";
     $("away").value = byElo[1] ? byElo[1].name : "";
+    LOADED_DOMAIN = domain;
   } catch (e) {
     setStatus("Impossible de charger les équipes : " + e.message, true);
   }
@@ -129,16 +135,23 @@ function bindUI() {
   $("advToggle").addEventListener("change", (e) => { $("advanced").hidden = !e.target.checked; });
   $("predictForm").addEventListener("submit", onAnalyze);
 
-  document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => switchView(t.dataset.view)));
+  document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => navTo({ view: t.dataset.view })));
 
   $("refreshBtn").addEventListener("click", () => { $("refreshModal").hidden = false; });
   $("refreshCancel").addEventListener("click", cancelRefresh);
   $("refreshStart").addEventListener("click", startRefresh);
 
   $("simBtn").addEventListener("click", runSimulation);
+
+  // Bouton « précédent » / geste retour : restaure l'état sans recharger la page.
+  window.addEventListener("popstate", (e) => {
+    NAV_RESTORING = true;
+    try { applyState(e.state); } finally { NAV_RESTORING = false; }
+  });
 }
 
-function switchView(view) {
+/* Bascule PURE de vue (onglets + panneaux), sans toucher à l'historique. */
+function applyView(view) {
   document.querySelectorAll(".tab").forEach((t) => {
     const on = t.dataset.view === view;
     t.classList.toggle("is-active", on);
@@ -154,18 +167,44 @@ function switchView(view) {
   if (view === "track") loadTrackRecord();
 }
 
+/* ------------------------------------------------------------- navigation
+   Bouton « précédent » du navigateur (et geste retour mobile) : chaque
+   changement d'onglet et chaque analyse crée une entrée d'historique
+   (history.pushState). Le retour restaure l'état SANS recharger la page. */
+function navTo(state) {
+  if (NAV_RESTORING) return;                 // pendant une restauration : pas de push
+  history.pushState(state, "");
+  applyState(state);
+}
+
+/* Applique un état d'historique (vue + éventuel match analysé). */
+function applyState(state) {
+  state = state || { view: "predict" };
+  applyView(state.view || "predict");
+  if (state.view === "predict") {
+    if (state.match) {
+      runPrediction(state.match);            // ré-affiche le résultat
+    } else {
+      $("results").hidden = true;            // retour « résultats -> formulaire »
+      setStatus("");
+    }
+  }
+}
+
+/* S'assure que les équipes du domaine de `competition` sont chargées (sans
+   réinitialiser inutilement le formulaire si le domaine n'a pas changé). */
+async function ensureTeams(competition) {
+  if ([...$("competition").options].some((o) => o.value === competition)) {
+    $("competition").value = competition;
+  }
+  if (currentDomain() !== LOADED_DOMAIN) await loadTeams();
+}
+
 /* Ouvre la prédiction d'un match donné (réutilisé par « Matchs à venir » et la CdM). */
 function analyzeMatch(competition, homeId, awayId, neutral) {
-  switchView("predict");
-  if ([...$("competition").options].some((o) => o.value === competition)) $("competition").value = competition;
-  loadTeams().then(() => {
-    $("home").value = TEAM_NAME[homeId] || homeId;
-    $("away").value = TEAM_NAME[awayId] || awayId;
-    $("neutral").checked = !!neutral;
-    if (neutral) { $("advToggle").checked = true; $("advanced").hidden = false; }
-    $("predictForm").requestSubmit();
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  });
+  const match = { competition, home: homeId, away: awayId, neutral: !!neutral, useQ: false };
+  navTo({ view: "predict", match });
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function setStatus(msg, err) {
@@ -175,21 +214,36 @@ function setStatus(msg, err) {
 }
 
 /* ---------------------------------------------------------------- analyse */
+/* Soumission du formulaire : on valide, puis on NAVIGUE vers le résultat (ce qui
+   crée une entrée d'historique). Le calcul réel est fait par runPrediction. */
 async function onAnalyze(e) {
   e.preventDefault();
   const competition = $("competition").value;
   const home = teamId($("home")), away = teamId($("away"));
   if (!home || !away) { setStatus("Choisis deux équipes dans la liste proposée.", true); return; }
   if (home === away) { setStatus("Choisis deux équipes différentes.", true); return; }
+  const match = { competition, home, away,
+                  neutral: $("neutral").checked, useQ: $("useQualitative").checked };
+  navTo({ view: "predict", match });
+}
 
-  const neutral = $("neutral").checked;
-  const useQ = $("useQualitative").checked;
+/* Calcule et affiche une prédiction pour `match` (ids d'équipes). Met le
+   formulaire en cohérence (utile lors d'une restauration via le bouton retour).
+   Ne touche PAS à l'historique : c'est l'appelant (navTo) qui s'en charge. */
+async function runPrediction(match) {
+  const { competition, home, away, neutral, useQ } = match;
   const btn = $("analyzeBtn");
   btn.disabled = true;
   setStatus('<span class="spinner"></span>Analyse en cours…');
   $("results").hidden = true;
-
   try {
+    await ensureTeams(competition);
+    $("home").value = TEAM_NAME[home] || home;
+    $("away").value = TEAM_NAME[away] || away;
+    $("neutral").checked = !!neutral;
+    $("useQualitative").checked = !!useQ;
+    if (neutral || useQ) { $("advToggle").checked = true; $("advanced").hidden = false; }
+
     const pred = await api("/api/predict", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
