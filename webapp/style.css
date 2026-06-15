@@ -228,6 +228,7 @@ option { background: #0c1322; }
 .badge { font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 999px; }
 .badge.yes { background: rgba(43, 213, 118, 0.18); color: var(--green); }
 .badge.no { background: rgba(255, 255, 255, 0.1); color: var(--muted); }
+.badge.warn { background: rgba(255, 181, 71, 0.18); color: var(--amber); margin: 0; font-size: 12px; }
 .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
 .kv div { background: var(--surface-2); border-radius: var(--radius-sm); padding: 12px 14px; }
 .kv .k { font-size: 12px; color: var(--muted); }
@@ -243,6 +244,7 @@ table.odds th { color: var(--muted); font-weight: 500; font-size: 12px; }
 table.odds td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .value-row { color: var(--green); font-weight: 600; }
 .value-tag { font-size: 11px; background: rgba(43, 213, 118, 0.18); color: var(--green); padding: 1px 7px; border-radius: 6px; }
+.value-tag.warn { background: rgba(255, 181, 71, 0.18); color: var(--amber); margin: 0; font-size: 11px; }
 
 /* matrix */
 .details summary { cursor: pointer; list-style: none; }

@@ -19,7 +19,7 @@ import pandas as pd
 
 from datetime import datetime, timedelta, timezone
 
-from . import badges, config, db, features
+from . import badges, config, db, devig, features
 from . import names as names_mod
 from . import odds_api, scorers, staking
 from .qualitative import QualitativeLayer
@@ -369,6 +369,15 @@ def recommend_stake(competition: str, home: str, away: str, selection: str,
         "home": pred.get("home", home), "away": pred.get("away", away),
         "selection": selection, "selection_label": label,
     })
+    # Garde-fou anti fausse-value : si la value tient sur un outsider où le modèle est
+    # en fort désaccord avec le prix, on le SIGNALE (proba 1/cote utilisée comme proxy
+    # du marché, prudente car elle inclut la marge). On ne retire pas la value, on prévient.
+    if rec.get("value"):
+        reliability, reason = _value_reliability(
+            pred.get("domain"), float(prob), rec.get("market_implied_prob"))
+        if reliability == "low":
+            rec["reliability"] = "low"
+            rec["warnings"] = [reason] + rec.get("warnings", [])
     return rec
 
 
@@ -391,9 +400,57 @@ _LIVE_SELECTION_LABELS = {
 }
 
 
-def _build_rows(best: dict, model_probs: dict, home: str, away: str) -> list[dict]:
+def _value_reliability(domain: str, model_prob: float | None,
+                       market_fair: float | None) -> tuple[str, str | None]:
+    """Fiabilité d'une value : « ok » ou « low » (+ raison) — garde-fou anti fausse-value.
+
+    Une value est jugée PEU FIABLE quand le marché voit l'issue en OUTSIDER et que le
+    modèle est en FORT désaccord (proba modèle ≥ ratio × proba équitable marché) :
+    c'est là que le modèle se trompe le plus, surtout en sélections (calibration vs
+    marché non prouvée). On ne la masque pas, on la marque « à confirmer ».
+    """
+    if model_prob is None or market_fair is None:
+        return "ok", None
+    intl = domain == config.DOMAIN_INTL
+    out_max = (config.VALUE_OUTSIDER_FAIR_MAX_INTL if intl
+               else config.VALUE_OUTSIDER_FAIR_MAX_CLUB)
+    ratio = (config.VALUE_DISAGREE_RATIO_INTL if intl
+             else config.VALUE_DISAGREE_RATIO_CLUB)
+    if market_fair < out_max and model_prob >= market_fair * ratio:
+        reason = (f"Le marché voit cette issue en outsider (~{round(market_fair * 100)} %) "
+                  f"et le modèle est en fort désaccord : value à confirmer, fiabilité "
+                  f"faible{' (sélections : calibration vs marché non prouvée)' if intl else ''}.")
+        return "low", reason
+    return "ok", None
+
+
+def _fair_market_probs(best: dict) -> dict:
+    """Probabilités de marché ÉQUITABLES (dévigées) par issue, à partir des meilleurs prix.
+
+    On retire la marge du bookmaker (devig) pour comparer honnêtement le modèle au
+    marché : `1/cote` brut surévalue la croyance du marché. Renvoie {sel: proba} pour
+    les issues dont le marché est complet (1X2 ou O/U)."""
+    fair: dict[str, float] = {}
+    h2h = best.get("h2h", {})
+    trio = [h2h.get(k, {}).get("odds") for k in ("home", "draw", "away")]
+    if all(o for o in trio):
+        fp = devig.fair_probs([float(o) for o in trio])
+        if fp:
+            fair.update({"home": fp[0], "draw": fp[1], "away": fp[2]})
+    tot = best.get("totals", {})
+    duo = [tot.get(k, {}).get("odds") for k in ("over", "under")]
+    if all(o for o in duo):
+        fp = devig.fair_probs([float(o) for o in duo])
+        if fp:
+            fair.update({"over": fp[0], "under": fp[1]})
+    return fair
+
+
+def _build_rows(best: dict, model_probs: dict, home: str, away: str,
+                domain: str = config.DOMAIN_CLUB) -> list[dict]:
     """Assemble la table « meilleur prix + value » à partir des cotes captées."""
     edge_thr = config.BET_EDGE_THRESHOLD
+    fair = _fair_market_probs(best)
     flat = {
         "home": ("1X2", best.get("h2h", {}).get("home")),
         "draw": ("1X2", best.get("h2h", {}).get("draw")),
@@ -408,14 +465,22 @@ def _build_rows(best: dict, model_probs: dict, home: str, away: str) -> list[dic
         odds = info["odds"]
         p = model_probs.get(sel)
         edge = (p * odds - 1.0) if p is not None else None
+        value = bool(edge is not None and edge > edge_thr)
+        mkt_fair = fair.get(sel)
+        reliability, reason = (_value_reliability(domain, p, mkt_fair)
+                               if value else ("ok", None))
         rows.append({
             "market": market, "selection": sel,
             "label": _LIVE_SELECTION_LABELS[sel].format(home=home, away=away),
             "best_odds": round(float(odds), 3), "book": info.get("book"),
             "model_prob": None if p is None else round(float(p), 4),
             "implied_prob": round(1.0 / odds, 4),
+            "market_fair_prob": None if mkt_fair is None else round(float(mkt_fair), 4),
             "edge": None if edge is None else round(float(edge), 4),
-            "value": bool(edge is not None and edge > edge_thr),
+            "value": value,
+            "reliability": reliability,
+            "value_reliable": bool(value and reliability == "ok"),
+            "reliability_note": reason,
         })
     return rows
 
@@ -470,7 +535,7 @@ def _football_data_fallback(competition: str, home: str, away: str,
                    for k, c in (("over", "odds_open_over25"),
                                 ("under", "odds_open_under25")) if row[c]},
     }
-    return _build_rows(best, model_probs, home, away)
+    return _build_rows(best, model_probs, home, away, domain=domain)
 
 
 def live_odds(competition: str, home: str, away: str, neutral: bool = False,
@@ -497,7 +562,8 @@ def live_odds(competition: str, home: str, away: str, neutral: bool = False,
         ev = odds_api.find_event(events, home_name, away_name)
         if ev:
             best = odds_api.best_prices(ev)
-            rows = _build_rows(best, model_probs, home_name, away_name)
+            rows = _build_rows(best, model_probs, home_name, away_name,
+                               domain=pred.get("domain"))
             _store_snapshots(ev.get("id"), competition, home_name, away_name, rows)
             return {**base, "available": bool(rows), "source": "the-odds-api",
                     "n_books": best.get("n_books", 0),
@@ -829,6 +895,7 @@ def best_value_today(days: int = 3, top_n: int = 3, max_scan: int = 60) -> dict:
 
     up = upcoming_matches(days)
     candidates: list[dict] = []
+    n_flagged = 0          # value écartées car peu fiables (outsider + fort désaccord)
     scanned = 0
     for m in up["matches"]:
         if not m.get("has_odds") or scanned >= max_scan:
@@ -843,25 +910,32 @@ def best_value_today(days: int = 3, top_n: int = 3, max_scan: int = 60) -> dict:
             continue
         for r in od.get("markets", []):
             p = r.get("model_prob")
-            if (r.get("value") and r.get("edge") is not None and p is not None
+            if not (r.get("value") and r.get("edge") is not None and p is not None
                     and p >= _VALUE_MIN_MODEL_PROB
                     and r.get("best_odds", 99) <= _VALUE_MAX_ODDS):
-                candidates.append({
-                    "competition": m["competition"], "domain": m["domain"],
-                    "home": m["home"], "away": m["away"],
-                    "home_team_id": m["home_team_id"], "away_team_id": m["away_team_id"],
-                    "home_badge": m["home_badge"], "away_badge": m["away_badge"],
-                    "date": m["date"], "commence_time": m["commence_time"],
-                    "neutral": bool(m.get("neutral", False)),
-                    "selection": r["selection"], "label": r["label"],
-                    "best_odds": r["best_odds"], "book": r["book"],
-                    "model_prob": r["model_prob"], "edge": r["edge"],
-                })
+                continue
+            # Garde-fou anti fausse-value : on ne met PAS en avant une value jugée
+            # peu fiable (outsider sur lequel le modèle est en fort désaccord).
+            if not r.get("value_reliable", True):
+                n_flagged += 1
+                continue
+            candidates.append({
+                "competition": m["competition"], "domain": m["domain"],
+                "home": m["home"], "away": m["away"],
+                "home_team_id": m["home_team_id"], "away_team_id": m["away_team_id"],
+                "home_badge": m["home_badge"], "away_badge": m["away_badge"],
+                "date": m["date"], "commence_time": m["commence_time"],
+                "neutral": bool(m.get("neutral", False)),
+                "selection": r["selection"], "label": r["label"],
+                "best_odds": r["best_odds"], "book": r["book"],
+                "model_prob": r["model_prob"], "edge": r["edge"],
+            })
     candidates.sort(key=lambda x: x["edge"], reverse=True)
     result = {
         "configured": odds_api.configured(),
         "edge_threshold": config.BET_EDGE_THRESHOLD,
         "scanned": scanned, "n_value": len(candidates),
+        "n_flagged": n_flagged,
         "items": candidates[:top_n],
     }
     c.update({"at": now_ts, "days": days, "data": result})

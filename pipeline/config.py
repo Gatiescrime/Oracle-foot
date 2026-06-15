@@ -196,6 +196,22 @@ BET_KELLY_CAP = float(os.environ.get("BET_KELLY_CAP", "5.0"))
 # (garde-fou anti-ruine), quel que soit ce que suggère Kelly.
 BET_MAX_STAKE_FRAC = float(os.environ.get("BET_MAX_STAKE_FRAC", "0.05"))
 
+# --- Garde-fou anti « fausse value » (Phase C) -----------------------------
+# Une value énorme sur un OUTSIDER, quand le modèle est en fort désaccord avec un
+# marché sérieux, est le plus souvent une ILLUSION (le modèle se trompe, surtout en
+# sélections où la calibration face au marché n'est pas prouvée). On ne la cache pas,
+# mais on la marque « à confirmer / faible fiabilité » au lieu de la vendre comme une
+# opportunité sûre. Une value est jugée PEU FIABLE si TOUTES ces conditions tiennent :
+#   - le marché est sérieux (assez de bookmakers) ;
+#   - l'issue est un OUTSIDER côté marché (proba équitable < seuil) ;
+#   - le modèle est en FORT désaccord (proba modèle ≥ ratio × proba équitable marché).
+VALUE_TRUST_MIN_BOOKS = int(os.environ.get("VALUE_TRUST_MIN_BOOKS", "3"))
+# Seuils « outsider » et « désaccord », plus stricts en sélections (intl).
+VALUE_OUTSIDER_FAIR_MAX_CLUB = float(os.environ.get("VALUE_OUTSIDER_FAIR_MAX_CLUB", "0.35"))
+VALUE_OUTSIDER_FAIR_MAX_INTL = float(os.environ.get("VALUE_OUTSIDER_FAIR_MAX_INTL", "0.50"))
+VALUE_DISAGREE_RATIO_CLUB = float(os.environ.get("VALUE_DISAGREE_RATIO_CLUB", "1.6"))
+VALUE_DISAGREE_RATIO_INTL = float(os.environ.get("VALUE_DISAGREE_RATIO_INTL", "1.35"))
+
 # --- Cotes du marché comme signal d'entrée (Phase P2) ----------------------
 # Deux leviers, par défaut OFF (le modèle livré reste « pur », sans avis du marché).
 # On n'utilise QUE les cotes d'OUVERTURE (pré-match) -> aucune fuite.

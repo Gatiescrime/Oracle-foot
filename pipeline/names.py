@@ -80,8 +80,19 @@ NATION_ALIASES = {
     "republic of ireland": "Republic of Ireland",
     "bosnia herzegovina": "Bosnia and Herzegovina",
     "bosnia and herzegovina": "Bosnia and Herzegovina",
+    "bosnia": "Bosnia and Herzegovina",
     "cabo verde": "Cape Verde",
     "cape verde islands": "Cape Verde",
+    # Variantes de libellé fréquentes chez the-odds-api / bookmakers (mots vraiment
+    # différents ; les écarts d'accent ou de casse sont déjà gérés par `alias_key`).
+    "uae": "United Arab Emirates",
+    "macedonia": "North Macedonia",
+    "fyr macedonia": "North Macedonia",
+    "trinidad tobago": "Trinidad and Tobago",        # "Trinidad & Tobago"
+    "hong kong china": "Hong Kong",
+    "democratic republic of the congo": "DR Congo",
+    "congo democratic republic": "DR Congo",
+    "kyrgyz republic": "Kyrgyzstan",
 }
 
 

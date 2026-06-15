@@ -392,9 +392,12 @@ async function loadStakeOrOdds(competition, home, away, neutral, useQ) {
 
 function renderStake(r) {
   const card = $("valueCard");
-  const verdict = r.value
-    ? `<span class="badge yes">Value détectée</span>`
-    : `<span class="badge no">Pas de value</span>`;
+  const lowConf = r.value && r.reliability === "low";
+  const verdict = !r.value
+    ? `<span class="badge no">Pas de value</span>`
+    : lowConf
+      ? `<span class="badge warn">Value à confirmer</span>`
+      : `<span class="badge yes">Value détectée</span>`;
   const stake = r.value
     ? `<div><div class="k">Mise conseillée</div><div class="v good">${Math.round(r.stake_amount)} € <span style="font-size:13px;color:var(--muted)">(${pct(r.stake_fraction)} du capital)</span></div></div>`
     : `<div><div class="k">Mise conseillée</div><div class="v">0 €</div></div>`;
@@ -420,18 +423,28 @@ function renderOdds(o) {
   const src = o.source === "the-odds-api"
     ? `Cotes live (${o.n_books || 0} bookmakers).`
     : "Cotes football-data (historiques, pas un prix live).";
+  const tag = (r) => {
+    if (!r.value) return "";
+    return r.value_reliable
+      ? ' <span class="value-tag">value</span>'
+      : ' <span class="value-tag warn" title="Le marché voit cette issue en outsider et le modèle est en fort désaccord : à confirmer.">value à confirmer</span>';
+  };
   const body = rows.map((r) =>
-    `<tr class="${r.value ? "value-row" : ""}">
-       <td>${r.label}${r.value ? ' <span class="value-tag">value</span>' : ""}</td>
+    `<tr class="${r.value_reliable ? "value-row" : ""}">
+       <td>${r.label}${tag(r)}</td>
        <td class="num">${f2(r.best_odds)}</td>
        <td>${r.book || ""}</td>
        <td class="num">${pct(r.model_prob)}</td>
        <td class="num">${r.edge == null ? "—" : (r.edge >= 0 ? "+" : "") + Math.round(r.edge * 100) + "%"}</td>
      </tr>`).join("");
+  const flagged = rows.some((r) => r.value && !r.value_reliable);
+  const note = flagged
+    ? `<p class="odds-src">« Value à confirmer » : le marché voit l'issue en outsider et le modèle est en fort désaccord — fiabilité faible, ce n'est pas une opportunité sûre.</p>`
+    : "";
   $("oddsBody").innerHTML =
     `<p class="odds-src">${src}</p>
      <table class="odds"><thead><tr><th>Issue</th><th>Meilleure cote</th><th>Book</th><th>Proba modèle</th><th>Avantage</th></tr></thead>
-     <tbody>${body}</tbody></table>`;
+     <tbody>${body}</tbody></table>${note}`;
   card.hidden = false;
 }
 
