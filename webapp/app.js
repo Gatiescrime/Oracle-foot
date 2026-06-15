@@ -46,6 +46,11 @@ let COMPS = { club: [], international: [] };
 let LASTPRED = null;
 let LOADED_DOMAIN = null;   // domaine dont les équipes sont actuellement chargées
 let NAV_RESTORING = false;  // true pendant une restauration via le bouton retour
+// Cache navigateur du socle statistique (déterministe) : une réanalyse du MÊME match
+// (retour/suivant, re-soumission) s'affiche INSTANTANÉMENT, sans roue ni scintillement.
+// Vidé à chaque rechargement de page (donc après un refresh des données -> reload).
+const CLIENT_PRED = {};
+const matchSig = (m) => [m.competition, m.home, m.away, m.neutral ? 1 : 0, m.useQ ? 1 : 0].join("|");
 // Équipes du domaine courant : maps pour la recherche par saisie (typeahead datalist).
 let TEAM_NAME = {};     // id -> nom affichable
 let TEAM_ID = {};       // nom (minuscule) -> id
@@ -173,6 +178,9 @@ function applyView(view) {
    (history.pushState). Le retour restaure l'état SANS recharger la page. */
 function navTo(state) {
   if (NAV_RESTORING) return;                 // pendant une restauration : pas de push
+  // Même état que l'entrée courante (re-soumission du même match, clic sur l'onglet
+  // déjà actif) : on ré-applique sans empiler de doublon dans l'historique.
+  if (JSON.stringify(state) === JSON.stringify(history.state)) { applyState(state); return; }
   history.pushState(state, "");
   applyState(state);
 }
@@ -234,8 +242,18 @@ async function runPrediction(match) {
   const { competition, home, away, neutral, useQ } = match;
   const btn = $("analyzeBtn");
   btn.disabled = true;
-  setStatus('<span class="spinner"></span>Analyse en cours…');
-  $("results").hidden = true;
+  const cached = CLIENT_PRED[matchSig(match)];
+  // Match déjà calculé (retour/suivant, re-soumission) : affichage INSTANTANÉ,
+  // sans masquer le résultat ni montrer la roue -> zéro scintillement.
+  if (cached) {
+    LASTPRED = cached;
+    renderPrediction(cached);
+    $("results").hidden = false;
+    setStatus("");
+  } else {
+    setStatus('<span class="spinner"></span>Analyse en cours…');
+    $("results").hidden = true;
+  }
   try {
     await ensureTeams(competition);
     $("home").value = TEAM_NAME[home] || home;
@@ -244,22 +262,26 @@ async function runPrediction(match) {
     $("useQualitative").checked = !!useQ;
     if (neutral || useQ) { $("advToggle").checked = true; $("advanced").hidden = false; }
 
-    const pred = await api("/api/predict", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ competition, home, away, neutral, use_qualitative: useQ }),
-    });
-    LASTPRED = pred;
-    renderPrediction(pred);
-    $("results").hidden = false;
-    setStatus("");
+    let pred = cached;
+    if (!pred) {
+      pred = await api("/api/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ competition, home, away, neutral, use_qualitative: useQ }),
+      });
+      CLIENT_PRED[matchSig(match)] = pred;
+      LASTPRED = pred;
+      renderPrediction(pred);
+      $("results").hidden = false;
+      setStatus("");
+    }
 
     // appels secondaires : un échec ne casse pas la prédiction principale
     renderActuWithBase(pred, competition, home, away, neutral, useQ);
     loadStakeOrOdds(competition, home, away, neutral, useQ);
     loadScorers(competition, home, away, neutral, useQ);
   } catch (err) {
-    setStatus(err.message, true);
+    if (!cached) setStatus(err.message, true);
   } finally {
     btn.disabled = false;
   }
