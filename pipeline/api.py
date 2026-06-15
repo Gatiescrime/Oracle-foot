@@ -191,6 +191,17 @@ def refresh_status() -> dict:
     return refresh_job.status()
 
 
+@app.post("/api/refresh/cancel")
+def cancel_refresh() -> dict:
+    """Annule la mise à jour en cours (le job de fond est abandonné proprement).
+
+    Renvoie 409 si aucune mise à jour n'est en cours.
+    """
+    if not refresh_job.cancel():
+        raise HTTPException(409, "Aucune mise à jour en cours.")
+    return refresh_job.status()
+
+
 @app.get("/api/meta")
 def meta() -> dict:
     """Métadonnées légères pour l'en-tête (date de dernière mise à jour des données)."""

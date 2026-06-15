@@ -40,9 +40,11 @@ def _first_available(df: pd.DataFrame, cols: list[str]) -> pd.Series:
     return pd.Series([pd.NA] * len(df), index=df.index, dtype="float64")
 
 
-def fetch_league_season(league: dict, season: dict, use_cache: bool = True) -> pd.DataFrame:
+def fetch_league_season(league: dict, season: dict, use_cache: bool = True,
+                        ttl_hours: float | None = None) -> pd.DataFrame:
     url = f"{config.FD_BASE_URL}/{season['fd']}/{league['fd']}.csv"
-    raw = http.fetch(url, cache_key=f"fd:{league['fd']}:{season['fd']}", use_cache=use_cache)
+    raw = http.fetch(url, cache_key=f"fd:{league['fd']}:{season['fd']}",
+                     use_cache=use_cache, ttl_hours=ttl_hours)
     df = pd.read_csv(io.BytesIO(raw), encoding="latin-1")
     if "FTHG" not in df.columns or "HomeTeam" not in df.columns:
         log.warning("colonnes inattendues pour %s %s", league["fd"], season["fd"])
@@ -91,12 +93,24 @@ def fetch_league_season(league: dict, season: dict, use_cache: bool = True) -> p
     return out
 
 
-def fetch_all(use_cache: bool = True) -> pd.DataFrame:
+def fetch_all(use_cache: bool = True, quick: bool = False) -> pd.DataFrame:
+    """Concatène toutes les ligues × saisons clubs.
+
+    `quick=True` (bouton « Rapide ») : seule la **saison en cours** (la dernière de
+    `CLUB_SEASONS`) gagne de nouveaux résultats ; les saisons passées sont
+    immuables. On ne re-télécharge donc QUE la saison courante et on réutilise le
+    cache disque des saisons passées (TTL long) — réponse en quelques secondes au
+    lieu de 25 fichiers, sans jamais perdre l'historique (tout est concaténé).
+    """
+    current_fd = config.CLUB_SEASONS[-1]["fd"]
     frames = []
     for league in config.CLUB_LEAGUES:
         for season in config.CLUB_SEASONS:
+            sc, ttl = use_cache, None
+            if quick and season["fd"] != current_fd:
+                sc, ttl = True, config.QUICK_HEAVY_TTL_HOURS   # saison passée -> cache
             try:
-                df = fetch_league_season(league, season, use_cache=use_cache)
+                df = fetch_league_season(league, season, use_cache=sc, ttl_hours=ttl)
             except Exception as e:  # noqa: BLE001
                 log.error("échec %s %s: %s", league["competition"], season["label"], e)
                 continue

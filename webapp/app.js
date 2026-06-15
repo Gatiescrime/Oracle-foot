@@ -690,11 +690,16 @@ async function startRefresh() {
   }
 }
 
-/* Annuler : stoppe le suivi et referme proprement (la tâche de fond, si lancée,
-   se terminera ou expirera seule côté serveur grâce au timeout global dur). */
-function cancelRefresh() {
+/* Annuler : stoppe le suivi, demande au serveur d'abandonner le job en cours
+   (s'il y en a un), puis referme proprement. Le timeout global dur reste un
+   filet de sécurité, mais l'annulation est désormais immédiate côté serveur. */
+async function cancelRefresh() {
+  const wasRunning = refreshTimer !== null;
   if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
   refreshStartTs = 0;
+  if (wasRunning) {
+    try { await api("/api/refresh/cancel", { method: "POST" }); } catch (e) { /* déjà fini/idle */ }
+  }
   $("refreshStart").disabled = false;
   $("refreshProgress").hidden = true;
   $("refreshModal").hidden = true;

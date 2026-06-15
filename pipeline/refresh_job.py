@@ -145,6 +145,25 @@ def run(mode: str = "rapide") -> None:
                           message=result.get("message", "Échec de la mise à jour."))
 
 
+def cancel() -> bool:
+    """Annule la mise à jour en cours, immédiatement et proprement.
+
+    On incrémente la génération : le worker (thread démon) en cours devient
+    « périmé » et `run` ignorera son résultat ; on libère le verrou en repassant à
+    l'état `idle`. Le thread se terminera seul en arrière-plan (ou expirera), sans
+    jamais réécrire l'état. Renvoie False si aucune mise à jour n'est en cours.
+    """
+    global _generation
+    with _lock:
+        if _state["state"] != "running":
+            return False
+        _generation += 1        # invalide le worker courant (run() bailera)
+        _state.update(state="idle", mode=None, finished_at=_now(),
+                      message="Mise à jour annulée.")
+    log.info("Mise à jour annulée par l'utilisateur")
+    return True
+
+
 def status() -> dict:
     s = dict(_state)
     s["last_updated"] = last_updated()

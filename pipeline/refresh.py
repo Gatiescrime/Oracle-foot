@@ -231,11 +231,12 @@ def _num(v):
 def refresh(use_cache: bool = True, quick: bool = False) -> dict:
     """Reconstruit la base depuis les sources.
 
-    `quick=True` (bouton « Rapide ») : ne re-télécharge QUE les sources légères
-    (résultats football-data + martj42) et RÉUTILISE le cache disque des sources
-    lentes (xG/joueurs understat) tant qu'il est plus frais que `QUICK_HEAVY_TTL_HOURS`.
-    Un timeout réseau court par source évite tout blocage long. Le mode complet
-    (`quick=False`) re-télécharge tout, sans plafond de cache.
+    `quick=True` (bouton « Rapide ») : ne re-télécharge QUE le strict nécessaire —
+    la **saison clubs en cours** (football-data) et le CSV des sélections (martj42) —
+    et RÉUTILISE le cache disque pour tout le reste : saisons clubs passées
+    (immuables) et sources lentes (xG/joueurs understat), tant qu'il est plus frais
+    que `QUICK_HEAVY_TTL_HOURS`. Un timeout réseau court par source évite tout
+    blocage long. Le mode complet (`quick=False`) re-télécharge tout, sans plafond.
     """
     # En rapide : cache lourd réutilisé (TTL 24h) + timeout réseau court par source.
     heavy_cache = True if quick else use_cache
@@ -250,7 +251,7 @@ def refresh(use_cache: bool = True, quick: bool = False) -> dict:
     summary = {}
     try:
         log.info("== CLUBS (football-data.co.uk)%s ==", " [rapide]" if quick else "")
-        df_fd = football_data.fetch_all(use_cache=use_cache)
+        df_fd = football_data.fetch_all(use_cache=use_cache, quick=quick)
         n_clubs = ingest_clubs(conn, df_fd) if not df_fd.empty else 0
         db.log_run(conn, "football-data", n_clubs, "ok" if n_clubs else "vide")
         summary["clubs"] = n_clubs

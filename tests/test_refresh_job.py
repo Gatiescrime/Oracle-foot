@@ -141,6 +141,63 @@ def test_api_refresh_conflict_when_running(monkeypatch):
     assert r.status_code == 409
 
 
+def test_cancel_running_job_frees_lock_and_resets_state(monkeypatch):
+    """Annuler une mise à jour en cours : état -> idle, verrou libéré, worker abandonné."""
+    refresh_job._state.update(state="running", mode="rapide")
+    gen_before = refresh_job._generation
+    assert refresh_job.cancel() is True
+    s = refresh_job.status()
+    assert s["state"] == "idle"
+    assert "annulée" in s["message"]
+    assert refresh_job._generation == gen_before + 1   # le worker courant est périmé
+    assert refresh_job.start("rapide") is True          # verrou libéré -> on peut relancer
+
+
+def test_cancel_without_running_job_returns_false(monkeypatch):
+    refresh_job._state.update(state="idle")
+    assert refresh_job.cancel() is False
+
+
+def test_cancelled_worker_cannot_overwrite_state(monkeypatch):
+    """Un worker annulé puis terminé ne doit JAMAIS réécrire l'état (génération périmée)."""
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_refresh(use_cache=True, quick=False):
+        started.set()
+        release.wait(2.0)            # bloque jusqu'à l'annulation
+        return {"clubs": 1}
+
+    monkeypatch.setattr(refresh_job.refresh, "refresh", slow_refresh)
+    monkeypatch.setattr(refresh_job.features, "build_all", lambda *a, **k: {})
+    monkeypatch.setattr(refresh_job.service, "clear_caches", lambda: None)
+    monkeypatch.setattr(refresh_job.config, "REFRESH_TIMEOUT_QUICK_S", 5.0)
+
+    refresh_job.start("rapide")
+    t = threading.Thread(target=refresh_job.run, args=("rapide",))
+    t.start()
+    started.wait(1.0)
+    assert refresh_job.cancel() is True       # annulation pendant l'exécution
+    release.set()                              # le worker finit ensuite
+    t.join(2.0)
+    s = refresh_job.status()
+    assert s["state"] == "idle"                # resté annulé, jamais repassé "done"
+
+
+def test_api_cancel_endpoint(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from pipeline import api
+    c = TestClient(api.app)
+    refresh_job._state.update(state="idle")
+    assert c.post("/api/refresh/cancel").status_code == 409   # rien à annuler
+    refresh_job._state.update(state="running", mode="rapide")
+    r = c.post("/api/refresh/cancel")
+    assert r.status_code == 200 and r.json()["state"] == "idle"
+
+
 def test_app_meta_exposes_last_updated(monkeypatch):
     """/api/meta renvoie l'horodatage persisté (Étape 2), avec repli latest_match_date."""
     from fastapi.testclient import TestClient
