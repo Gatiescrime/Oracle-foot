@@ -90,13 +90,17 @@ HTTP_TIMEOUT = 45
 # le cache disque tant qu'il est plus frais que ce TTL. But : réponse en quelques
 # secondes, jamais bloquée.
 QUICK_HEAVY_TTL_HOURS = float(os.environ.get("QUICK_HEAVY_TTL_HOURS", "24"))
-# Timeout réseau COURT par source en mode rapide (échec franc plutôt que blocage).
+# Timeout réseau COURT par source (échec franc plutôt que blocage). Utilisé pour la
+# phase DONNÉES des DEUX modes (rapide ET complet) : aucune source lente n'est
+# re-scrapée longuement, le cache disque est réutilisé.
 QUICK_HTTP_TIMEOUT = float(os.environ.get("QUICK_HTTP_TIMEOUT", "8"))
 QUICK_HTTP_RETRIES = int(os.environ.get("QUICK_HTTP_RETRIES", "1"))
-# Timeout GLOBAL DUR du job de mise à jour : au-delà, état « error » propre (le job
-# ne peut JAMAIS rester bloqué indéfiniment). Rapide court, complet généreux (train).
-REFRESH_TIMEOUT_QUICK_S = float(os.environ.get("REFRESH_TIMEOUT_QUICK_S", "25"))
-REFRESH_TIMEOUT_FULL_S = float(os.environ.get("REFRESH_TIMEOUT_FULL_S", "300"))
+# Budgets de temps SÉPARÉS du job de mise à jour (le job ne peut JAMAIS rester
+# bloqué ; et le réseau ne doit jamais tuer le réentraînement légitimement long) :
+#   * phase DONNÉES (téléchargement léger récent + features) : budget COURT ;
+#   * phase RÉENTRAÎNEMENT (mode complet) : budget LARGE, dédié.
+REFRESH_DATA_TIMEOUT_S = float(os.environ.get("REFRESH_DATA_TIMEOUT_S", "60"))
+REFRESH_TRAIN_TIMEOUT_S = float(os.environ.get("REFRESH_TRAIN_TIMEOUT_S", "480"))
 
 # --- Ligues de clubs -------------------------------------------------------
 # Chaque ligue relie le code football-data, le code understat et un libellé commun.

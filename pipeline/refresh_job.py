@@ -1,25 +1,36 @@
 """Mise à jour des données « en temps présent », pilotée depuis l'UI.
 
-Un clic sur « Mettre à jour les données » lance, EN TÂCHE DE FOND :
-  (a) refresh.refresh(use_cache=False) : re-télécharge résultats récents + calendrier ;
-  (b) features.build_all() : reconstruit les features sans fuite (Elo + forme + xG) ;
-  (c) en mode « complet » : train.train_all() réentraîne et réexporte les modèles ;
-  (d) service.clear_caches() : l'app sert immédiatement les données fraîches.
+Un clic sur « Mettre à jour les données » lance, EN TÂCHE DE FOND, DEUX phases au
+budget de temps SÉPARÉ (essentiel : le réseau ne doit pas tuer le réentraînement) :
+
+  Phase 1 — DONNÉES (budget court, `REFRESH_DATA_TIMEOUT_S`) :
+    (a) refresh.refresh(quick=True) : ne re-télécharge QUE le léger récent
+        (saison clubs en cours + sélections martj42) et RÉUTILISE le cache des
+        sources lentes (xG/joueurs understat). Timeouts réseau courts par source.
+    (b) features.build_all() : reconstruit les features sans fuite (Elo + forme + xG).
+
+  Phase 2 — RÉENTRAÎNEMENT (budget large, `REFRESH_TRAIN_TIMEOUT_S`, « complet » seul) :
+    (c) train.train_all() : réentraîne et réexporte les modèles. Légitimement long,
+        donc protégé par son PROPRE budget — jamais tué par le timeout réseau.
+
+  Enfin : service.clear_caches() pour servir immédiatement les données fraîches.
 
 Deux modes :
-  - « rapide »  : (a) + (b) + (d), sans réentraînement ;
-  - « complet » : (a) + (b) + (c) + (d).
+  - « rapide »  : phase 1 seulement ;
+  - « complet » : phase 1 PUIS phase 2. Les DEUX modes réutilisent le cache des
+    sources lentes (le complet ne re-scrape plus understat depuis zéro).
 
 L'état est suivi en mémoire (un seul job à la fois, verrou anti-double-clic) et
 l'horodatage de la dernière mise à jour réussie est persisté en base (table app_meta).
 Aucune source réseau indisponible ne fait planter l'app : l'erreur est capturée et
-remontée dans le statut.
+remontée. Le bouton « Annuler » interrompt proprement à tout moment (cf. `cancel`).
 """
 
 from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 
 from . import config, db, features, refresh, service, train
@@ -83,66 +94,120 @@ def start(mode: str = "rapide") -> bool:
     return True
 
 
-def _do_work(mode: str, result: dict) -> None:
-    """Le travail réel (réseau + features + éventuel entraînement).
+def _do_data(result: dict) -> None:
+    """Phase 1 : données légères récentes (cache des sources lentes) + features.
 
-    Écrit SON résultat dans `result` (jamais dans `_state`) : si ce worker est
-    abandonné après un dépassement de délai, il ne peut pas corrompre l'état d'un
-    job plus récent. Le contrôleur (`run`) seul met `_state` à jour.
+    Écrit SON résultat dans `result` (jamais dans `_state`) : un worker abandonné
+    (timeout / annulation) ne peut pas corrompre l'état d'un job plus récent.
+    `quick=True` même en mode complet : on ne re-scrape PAS understat depuis zéro.
     """
     try:
-        quick = mode != "complet"
-        summary = refresh.refresh(use_cache=False, quick=quick)
+        summary = refresh.refresh(use_cache=False, quick=True)
         feats = features.build_all()
-        msg = (f"Données rafraîchies : {summary.get('clubs', 0)} matchs clubs, "
-               f"{summary.get('internationals', 0)} sélections, "
-               f"{summary.get('fixtures', 0)} matchs à venir ; "
-               f"features clubs={feats.get('club', 0)}, intl={feats.get('international', 0)}.")
-        if mode == "complet":
-            train.train_all()
-            msg += " Modèles réentraînés."
-        service.clear_caches()
         result["state"] = "done"
-        result["message"] = msg
+        result["message"] = (
+            f"Données rafraîchies : {summary.get('clubs', 0)} matchs clubs, "
+            f"{summary.get('internationals', 0)} sélections, "
+            f"{summary.get('fixtures', 0)} matchs à venir ; "
+            f"features clubs={feats.get('club', 0)}, intl={feats.get('international', 0)}.")
     except Exception as e:  # noqa: BLE001 — jamais de crash, on remonte l'erreur
-        log.exception("Mise à jour %s en échec", mode)
+        log.exception("Phase données en échec")
         result["state"] = "error"
         result["message"] = f"Échec de la mise à jour : {e}"
 
 
+def _do_train(result: dict) -> None:
+    """Phase 2 : réentraînement des modèles (légitimement long, budget dédié)."""
+    try:
+        train.train_all()
+        result["state"] = "done"
+    except Exception as e:  # noqa: BLE001
+        log.exception("Réentraînement en échec")
+        result["state"] = "error"
+        result["message"] = f"Échec du réentraînement : {e}"
+
+
+def _join_cancellable(worker: threading.Thread, timeout: float, gen: int) -> str:
+    """Attend `worker` jusqu'à `timeout`, en restant réactif à l'ANNULATION.
+
+    Renvoie "done" (terminé), "timeout" (délai dépassé) ou "cancelled" (une
+    annulation / un job plus récent a incrémenté la génération). On ne tient PAS le
+    verrou pendant l'attente, pour que `cancel` puisse agir à tout moment.
+    """
+    end = time.monotonic() + timeout
+    while worker.is_alive():
+        if _generation != gen:
+            return "cancelled"
+        if time.monotonic() >= end:
+            return "timeout"
+        worker.join(0.5)
+    return "done"
+
+
+def _fail(gen: int, message: str, log_msg: str) -> None:
+    """Passe proprement en « error » si ce job est toujours le plus récent."""
+    with _lock:
+        if gen != _generation:
+            return
+        _state.update(state="error", finished_at=_now(), message=message)
+    log.error(log_msg)
+
+
 def run(mode: str = "rapide") -> None:
-    """Pilote la mise à jour avec un TIMEOUT GLOBAL DUR : le job ne peut jamais
-    rester bloqué. Le travail tourne dans un thread ; au-delà du délai, l'état
-    bascule proprement en « error » et le thread (démon) est abandonné.
+    """Pilote la mise à jour en DEUX phases au budget SÉPARÉ. Le job ne peut jamais
+    rester bloqué (chaque phase a son délai dur) et l'annulation est prise en compte
+    immédiatement. Les workers (démons) abandonnés ne réécrivent jamais l'état.
     """
     global _generation
     with _lock:
         _generation += 1
         gen = _generation
-    timeout = (config.REFRESH_TIMEOUT_FULL_S if mode == "complet"
-               else config.REFRESH_TIMEOUT_QUICK_S)
 
-    result: dict = {}
-    worker = threading.Thread(target=_do_work, args=(mode, result), daemon=True)
-    worker.start()
-    worker.join(timeout)
+    # --- Phase 1 : DONNÉES (budget réseau court) ---------------------------
+    r1: dict = {}
+    w1 = threading.Thread(target=_do_data, args=(r1,), daemon=True)
+    w1.start()
+    s1 = _join_cancellable(w1, config.REFRESH_DATA_TIMEOUT_S, gen)
+    if s1 == "cancelled":
+        return
+    if s1 == "timeout":
+        _fail(gen, "Délai dépassé : le réseau est trop lent. Réessaie plus tard "
+                   "(les sources lentes sont mises en cache).",
+              f"Mise à jour {mode} : phase données dépassée ({config.REFRESH_DATA_TIMEOUT_S:.0f}s)")
+        return
+    if r1.get("state") != "done":
+        _fail(gen, r1.get("message", "Échec de la mise à jour."),
+              f"Mise à jour {mode} : échec de la phase données")
+        return
+    msg = r1["message"]
 
+    # --- Phase 2 : RÉENTRAÎNEMENT (budget large, complet seulement) ---------
+    if mode == "complet":
+        r2: dict = {}
+        w2 = threading.Thread(target=_do_train, args=(r2,), daemon=True)
+        w2.start()
+        s2 = _join_cancellable(w2, config.REFRESH_TRAIN_TIMEOUT_S, gen)
+        if s2 == "cancelled":
+            return
+        if s2 == "timeout":
+            _fail(gen, "Réentraînement trop long : délai dépassé. Les données récentes "
+                       "sont tout de même à jour ; réessaie le mode complet plus tard.",
+                  f"Mise à jour complète : réentraînement dépassé ({config.REFRESH_TRAIN_TIMEOUT_S:.0f}s)")
+            return
+        if r2.get("state") != "done":
+            _fail(gen, r2.get("message", "Échec du réentraînement."),
+                  "Mise à jour complète : échec du réentraînement")
+            return
+        msg += " Modèles réentraînés."
+
+    # --- Finalisation : caches vidés, horodatage persisté ------------------
+    service.clear_caches()
     with _lock:
-        if gen != _generation:           # un job plus récent a pris la main
+        if gen != _generation:
             return
-        if worker.is_alive():            # dépassement de délai : jamais bloqué
-            _state.update(state="error", finished_at=_now(),
-                          message=("Délai dépassé : le réseau est trop lent. "
-                                   "Réessaie plus tard (les sources lentes sont mises en cache)."))
-            log.error("Mise à jour %s : délai global de %.0fs dépassé", mode, timeout)
-            return
-        if result.get("state") == "done":
-            _persist_last_updated()
-            _state.update(state="done", finished_at=_now(), message=result["message"])
-            log.info("Mise à jour %s terminée : %s", mode, result["message"])
-        else:
-            _state.update(state="error", finished_at=_now(),
-                          message=result.get("message", "Échec de la mise à jour."))
+        _persist_last_updated()
+        _state.update(state="done", finished_at=_now(), message=msg)
+    log.info("Mise à jour %s terminée : %s", mode, msg)
 
 
 def cancel() -> bool:

@@ -21,22 +21,36 @@ Désormais, en Rapide :
 L'historique complet reste intact : toutes les saisons sont concaténées, seules
 les **sources réseau** changent. Résultat typique : quelques secondes.
 
-> Le **mode Complet** (réentraînement) re-télécharge tout, sans plafond de cache.
+> Le **mode Complet** réutilise lui aussi le cache des sources lentes (voir §2 bis) :
+> il ne re-télécharge que le léger récent, puis **réentraîne** les modèles.
 
-## 2. Aucune mise à jour ne peut se bloquer
+## 2. Aucune mise à jour ne peut se bloquer — budgets de temps SÉPARÉS
 
-- **Timeout réseau court par source** en Rapide (`QUICK_HTTP_TIMEOUT` = 8 s,
-  1 seul essai) : une source lente ne fige pas le job.
-- **Timeout global dur** du job (`REFRESH_TIMEOUT_QUICK_S` = 25 s en Rapide,
-  300 s en Complet) : au-delà, l'état bascule proprement en **« error »** avec un
-  message clair, jamais un sablier infini. Le thread de travail (démon) est
-  abandonné sans pouvoir corrompre l'état d'un job plus récent.
-- **Bouton Annuler réel** (nouveau) : « Annuler » appelle maintenant
-  `POST /api/refresh/cancel`, qui **abandonne immédiatement** le job en cours
-  (la génération est incrémentée → le worker devient périmé et ne pourra plus
-  réécrire l'état), libère le verrou et repasse à `idle` (« Mise à jour
-  annulée »). On peut relancer aussitôt. Avant, « Annuler » ne fermait que la
-  fenêtre côté navigateur ; le job continuait en fond.
+- **Timeout réseau court par source** (`QUICK_HTTP_TIMEOUT` = 8 s, 1 seul essai)
+  pour la phase données des **deux** modes : une source lente ne fige pas le job.
+- **Deux budgets distincts** (au-delà : état **« error »** propre, jamais de sablier
+  infini) :
+  - **phase DONNÉES** (téléchargement léger + features) : `REFRESH_DATA_TIMEOUT_S`
+    = **60 s** ;
+  - **phase RÉENTRAÎNEMENT** (mode complet) : `REFRESH_TRAIN_TIMEOUT_S` = **480 s
+    (8 min)**, son **propre** budget. Le réentraînement est légitimement long et
+    n'est donc **jamais tué par le timeout réseau** (c'était la cause de l'échec du
+    mode Complet).
+- **Bouton Annuler réel** : « Annuler » appelle `POST /api/refresh/cancel`, qui
+  **abandonne immédiatement** le job en cours — y compris **pendant le
+  réentraînement** (la génération est incrémentée → le worker devient périmé, le
+  contrôleur le détecte en ≤ 0,5 s et ne réécrit plus l'état), libère le verrou et
+  repasse à `idle`. On peut relancer aussitôt.
+
+## 2 bis. Mode Complet : ne plus re-scraper les sources lentes (CORRECTIF)
+
+**Avant**, le mode Complet re-téléchargeait TOUT depuis zéro (understat compris, très
+lent) **puis** réentraînait — le tout sous un seul délai global, qu'il dépassait
+→ échec. **Désormais**, le mode Complet fait sa phase données **exactement comme le
+Rapide** : il ne re-télécharge que la **saison clubs en cours** + les **sélections
+martj42** (résultats récents, Coupe du Monde incluse) et **réutilise le cache** des
+sources lentes (xG/joueurs understat, TTL 24 h). Il **réentraîne** ensuite sur ces
+données, dans son budget dédié. Aucune source lente n'est re-téléchargée inutilement.
 
 ## 3. Résultats de la Coupe du Monde pris en compte (basculement)
 
@@ -63,21 +77,29 @@ affiche **USA – Paraguay**, sans réseau :
 - `pipeline/sources/football_data.py` : `fetch_all(quick=…)` ne re-télécharge que
   la saison courante ; `fetch_league_season` accepte un `ttl_hours`.
 - `pipeline/refresh.py` : transmet `quick` à football-data (docstring mise à jour).
-- `pipeline/refresh_job.py` : nouvelle fonction `cancel()` (annulation propre).
-- `pipeline/api.py` : nouvel endpoint `POST /api/refresh/cancel`.
+- `pipeline/refresh_job.py` : pipeline en **deux phases à budget séparé**
+  (`_do_data` / `_do_train` + `_join_cancellable`) ; le mode complet réutilise le
+  cache (`quick=True`) puis réentraîne ; `cancel()` réactif (≤ 0,5 s, même en train).
+- `pipeline/config.py` : `REFRESH_DATA_TIMEOUT_S` (60 s) + `REFRESH_TRAIN_TIMEOUT_S`
+  (480 s) remplacent l'ancien timeout global unique.
+- `pipeline/api.py` : endpoint `POST /api/refresh/cancel`.
 - `webapp/app.js` : le bouton « Annuler » appelle le serveur quand un job tourne.
 
 ## Tests (tous verts)
-- `tests/test_refresh_quick.py` (2) : Rapide ne re-télécharge que la saison en
-  cours ; Complet télécharge toutes les saisons.
-- `tests/test_refresh_job.py` (+4) : annulation libère le verrou et remet à `idle` ;
-  rien à annuler → 409 ; un worker annulé ne réécrit jamais l'état ; endpoint API.
+- `tests/test_refresh_quick.py` (2) : Rapide ne re-télécharge que la saison en cours ;
+  `fetch_all(quick=False)` (CLI hors UI) télécharge toutes les saisons.
+- `tests/test_refresh_job.py` : modes rapide/complet, **complet réutilise le cache**
+  (`quick=True`) **et** réentraîne ; **budget données** dépassé → erreur propre ; un
+  **train long n'est pas tué** par le budget données ; **timeout d'entraînement**
+  dédié ; **annulation pendant le train** → idle ; verrou, endpoints API.
 - `tests/test_world_cup_results.py` (2) : parsing joué/à venir + basculement complet.
 
-**Suite complète : 181 tests verts.**
+**Suite complète : 208 tests verts.**
 
 ## Critère d'acceptation — atteint
 ✅ Rapide ne re-télécharge que le strict nécessaire (saison en cours + martj42) → quelques secondes
-✅ Aucune mise à jour ne peut se bloquer (timeout par source + global) ; bouton Annuler réel
+✅ **Complet** : réutilise le cache des sources lentes puis réentraîne, **sans dépasser
+   le délai** (budgets réseau et entraînement séparés) ; résultats récents (CdM) intégrés
+✅ Aucune mise à jour ne peut se bloquer ; bouton Annuler réel, réactif même pendant le train
 ✅ Après refresh, un match de CdM terminé entre dans l'historique (Elo/features) et quitte « à venir »
 ✅ Basculement prouvé par un test dédié
