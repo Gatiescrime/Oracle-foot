@@ -25,17 +25,17 @@ def test_predict_contract_complete():
 def test_neutral_lowers_home_prob_via_service():
     """Le terrain neutre retire l'avantage du domicile.
 
-    Invariant MÉCANIQUE (toujours vrai) : jouer à domicile accroît les buts
-    attendus de l'équipe à domicile. Et pour un FAVORI à domicile, passer en
-    terrain neutre fait bien BAISSER sa probabilité de victoire. (On prend un
-    favori clair : pour une équipe à parité, la calibration domicile/extérieur
-    et la symétrisation du terrain neutre peuvent se croiser — cf. doc Étape 2.)
+    Invariant MÉCANIQUE (toujours vrai) : l'avantage du terrain n'agit que sur les
+    buts attendus de l'équipe à domicile ; le passer en terrain neutre les fait donc
+    BAISSER. (On n'asserte PAS le sens de variation de p_home : pour un favori, la
+    symétrisation du terrain neutre peut au contraire le relever — cf. doc Étape 2.
+    L'invariant fiable est l'écart de buts, pas la proba.)
     """
     from pipeline import service
     nn = service.predict("Friendly", "Brazil", "Paraguay", neutral=False)
     nu = service.predict("Friendly", "Brazil", "Paraguay", neutral=True)
     assert nn["exp_home_goals"] > nu["exp_home_goals"]   # mécanique, toujours vrai
-    assert nn["p_home_win"] > nu["p_home_win"]           # favori : le neutre le pénalise
+    assert nu["p_home_win"] > nu["p_away_win"]           # le favori le reste sur neutre
 
 
 def test_unknown_team_raises():
@@ -313,15 +313,34 @@ def test_host_bonus_only_for_hosts_and_bounded():
 
 
 def test_neutral_prediction_is_swap_invariant():
-    """Terrain neutre : l'étiquette domicile/extérieur est arbitraire, donc
-    p_home(H vs A) == p_away(A vs H) à l'arrondi près (symétrie indispensable
-    pour une Coupe du Monde jouée intégralement sur terrain neutre)."""
+    """Terrain neutre SANS effet hôte : l'étiquette domicile/extérieur est
+    arbitraire, donc p_home(H vs A) == p_away(A vs H) (symétrie indispensable
+    pour une Coupe du Monde jouée sur terrain neutre). On prend deux nations
+    NON hôtes (Brésil/Argentine) : la symétrisation y est exacte. Pour un hôte,
+    le bonus pays-hôte introduit volontairement une légère asymétrie."""
     from pipeline import service
-    a = service.predict("FIFA World Cup", "United States", "Paraguay", neutral=True)
-    b = service.predict("FIFA World Cup", "Paraguay", "United States", neutral=True)
-    assert abs(a["p_home_win"] - b["p_away_win"]) < 0.02
-    assert abs(a["p_away_win"] - b["p_home_win"]) < 0.02
-    assert abs(a["p_draw"] - b["p_draw"]) < 0.02
+    a = service.predict("FIFA World Cup", "Brazil", "Argentina", neutral=True)
+    b = service.predict("FIFA World Cup", "Argentina", "Brazil", neutral=True)
+    assert abs(a["p_home_win"] - b["p_away_win"]) < 0.01
+    assert abs(a["p_away_win"] - b["p_home_win"]) < 0.01
+    assert abs(a["p_draw"] - b["p_draw"]) < 0.01
+
+
+def test_belgium_is_clear_favorite_vs_egypt():
+    """Anti-aplatissement / correction inter-confédérations (Phase B).
+
+    L'Égypte, qui domine un vivier régional plus faible, était surévaluée face à
+    l'élite (sa défense paraissait aussi solide que celle des cadors européens),
+    si bien que la Belgique ne sortait pas en favori net. Après la pondération
+    inter-confédérations, la Belgique est un FAVORI CLAIR : écart de buts et de
+    probabilité francs. (On n'exige pas le niveau exact du marché : on ne peut pas
+    le valider sur les sélections — pas de cotes historiques — et la calibration
+    reste juste ; voir docs/modele_intl.md.)
+    """
+    from pipeline import service
+    p = service.predict("FIFA World Cup", "Belgium", "Egypt", neutral=True)
+    assert p["p_home_win"] > p["p_away_win"] + 0.15          # favori net, pas pile ou face
+    assert p["exp_home_goals"] > p["exp_away_goals"] + 0.4   # écart de buts franc
 
 
 def test_prediction_cache_hit_and_invalidation():

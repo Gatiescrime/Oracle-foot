@@ -150,6 +150,34 @@ WORLD_CUP_COMPETITION = "FIFA World Cup"
 WORLD_CUP_HOSTS = {"United States", "Canada", "Mexico"}
 HOST_GOAL_LOG_BONUS = float(os.environ.get("HOST_GOAL_LOG_BONUS", "0.30"))
 
+# --- Hyperparamètres Dixon-Coles PAR DOMAINE -------------------------------
+# Les CLUBS jouent dans des ligues fermées, bien connectées : réglage standard.
+# Les SÉLECTIONS sont mal connectées ENTRE confédérations — une équipe qui domine
+# un vivier régional faible (p. ex. l'Égypte en zone Afrique) paraît plus forte
+# qu'elle ne l'est face à l'élite européenne/sud-américaine, car les matchs
+# inter-confédérations sont rares. On corrige ce biais SANS fuite (poids FIXES,
+# non appris) en pondérant davantage les matchs qui « relient » les confédérations
+# (Coupe du Monde, Coupe des Confédérations, amicaux souvent intercontinentaux),
+# et en relâchant un peu la régularisation pour mieux différencier les niveaux.
+# Validé en backtest chronologique : RPS international stable, meilleure
+# différenciation (voir docs/modele_intl.md).
+DC_PARAMS_CLUB: dict = {}
+DC_PARAMS_INTL: dict = {
+    # reg=1.5 conservé : il évite les espérances de buts absurdes et les
+    # probabilités affichées à 100 % sur les écarts extrêmes (honnêteté). On
+    # ajoute UNIQUEMENT la pondération inter-confédérations (le correctif de fond).
+    "comp_weight": {
+        "FIFA World Cup": 4.0,
+        "Confederations Cup": 4.0,
+        "Friendly": 1.5,
+    },
+}
+
+
+def dc_params(domain: str) -> dict:
+    """Hyperparamètres Dixon-Coles à utiliser pour un domaine donné."""
+    return dict(DC_PARAMS_INTL if domain == DOMAIN_INTL else DC_PARAMS_CLUB)
+
 # --- Backtest de PARIS (Phase P1) ------------------------------------------
 # Métrique de vérité : battre le bookmaker en simulation chronologique anti-fuite.
 # Edge minimal requis pour parier : (prob_modèle * cote) - 1 > seuil.

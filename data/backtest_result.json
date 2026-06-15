@@ -80,71 +80,71 @@
   },
   "international": {
     "domain": "international",
-    "n_predictions": 24703,
-    "rps_raw": 0.20336449829130065,
-    "rps_calibrated": 0.19489112031137235,
-    "logloss_raw": 0.9795042190537594,
-    "logloss_calibrated": 0.95540626419463,
+    "n_predictions": 24708,
+    "rps_raw": 0.20263517212198479,
+    "rps_calibrated": 0.19408078885722335,
+    "logloss_raw": 0.978091580550848,
+    "logloss_calibrated": 0.9536399025711771,
     "calibration": [
       {
         "bin": "0.0-0.1",
-        "predit_moyen": 0.059,
-        "observe": 0.068,
-        "effectif": 4916
+        "predit_moyen": 0.057,
+        "observe": 0.071,
+        "effectif": 5098
       },
       {
         "bin": "0.1-0.2",
-        "predit_moyen": 0.16,
-        "observe": 0.168,
-        "effectif": 11717
+        "predit_moyen": 0.162,
+        "observe": 0.171,
+        "effectif": 12744
       },
       {
         "bin": "0.2-0.3",
-        "predit_moyen": 0.247,
-        "observe": 0.253,
-        "effectif": 25833
+        "predit_moyen": 0.25,
+        "observe": 0.255,
+        "effectif": 25025
       },
       {
         "bin": "0.3-0.4",
-        "predit_moyen": 0.349,
+        "predit_moyen": 0.35,
         "observe": 0.348,
-        "effectif": 10160
+        "effectif": 9715
       },
       {
         "bin": "0.4-0.5",
-        "predit_moyen": 0.448,
-        "observe": 0.435,
-        "effectif": 6864
+        "predit_moyen": 0.446,
+        "observe": 0.434,
+        "effectif": 6641
       },
       {
         "bin": "0.5-0.6",
         "predit_moyen": 0.549,
-        "observe": 0.538,
-        "effectif": 5706
+        "observe": 0.536,
+        "effectif": 6183
       },
       {
         "bin": "0.6-0.7",
-        "predit_moyen": 0.645,
-        "observe": 0.626,
-        "effectif": 4496
+        "predit_moyen": 0.648,
+        "observe": 0.636,
+        "effectif": 3883
       },
       {
         "bin": "0.7-0.8",
-        "predit_moyen": 0.742,
-        "observe": 0.742,
-        "effectif": 2713
+        "predit_moyen": 0.743,
+        "observe": 0.738,
+        "effectif": 3089
       },
       {
         "bin": "0.8-0.9",
         "predit_moyen": 0.842,
-        "observe": 0.812,
-        "effectif": 1127
+        "observe": 0.806,
+        "effectif": 1158
       },
       {
         "bin": "0.9-1.0",
-        "predit_moyen": 0.947,
-        "observe": 0.919,
-        "effectif": 577
+        "predit_moyen": 0.95,
+        "observe": 0.915,
+        "effectif": 588
       }
     ]
   }

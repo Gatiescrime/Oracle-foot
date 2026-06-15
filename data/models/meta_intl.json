@@ -1,7 +1,7 @@
 {
   "domain": "international",
-  "n_matches": 49405,
-  "trained_on": "2026-06-13",
+  "n_matches": 49415,
+  "trained_on": "2026-06-15",
   "n_teams": 336,
   "has_xgb": true,
   "calibrated": true

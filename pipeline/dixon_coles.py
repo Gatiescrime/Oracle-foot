@@ -112,7 +112,7 @@ def _matrix_to_prediction(mat, home, away, neutral, lambdas):
 
 def fit_dixon_coles(matches: pd.DataFrame, xi: float = 0.0018, reg: float = 1.5,
                     min_matches: int = 8, max_iter: int = 2000, verbose: bool = True,
-                    ref_date=None) -> DixonColesModel:
+                    ref_date=None, comp_weight: dict | None = None) -> DixonColesModel:
     """Estime le modèle par maximum de vraisemblance pondéré + régularisé.
 
     matches : colonnes date, home_team, away_team, home_goals, away_goals, neutral.
@@ -120,6 +120,10 @@ def fit_dixon_coles(matches: pd.DataFrame, xi: float = 0.0018, reg: float = 1.5,
     reg     : force de la régularisation L2 sur attaque/défense.
     min_matches : une équipe doit avoir au moins ce nombre de matchs (pondérés ~)
                   pour être paramétrée ; sinon elle est « moyenne » (0).
+    comp_weight : poids FIXE par compétition (ex. {"FIFA World Cup": 4.0}) multipliant
+                  la pondération des matchs. Sert à donner plus d'importance aux
+                  rencontres INTER-confédérations (sélections), qui relient les niveaux
+                  entre zones. Non appris -> aucune fuite. None -> tous à 1.
 
     CALIBRAGE (vérifié en backtest chronologique, voir
     docs/amelioration_modele_intl.md) :
@@ -140,6 +144,14 @@ def fit_dixon_coles(matches: pd.DataFrame, xi: float = 0.0018, reg: float = 1.5,
     ref = pd.Timestamp(ref_date) if ref_date is not None else df["date"].max()
     age_days = (ref - df["date"]).dt.days.to_numpy().astype(float)
     weights = np.exp(-xi * age_days)
+
+    # Pondération par compétition (FIXE, non apprise -> aucune fuite) : permet de
+    # donner plus de poids aux matchs INTER-confédérations (Coupe du Monde, etc.),
+    # qui « connectent » les niveaux entre confédérations et corrigent la
+    # surévaluation des sélections dominant un vivier régional faible.
+    if comp_weight and "competition" in df.columns:
+        cw = df["competition"].map(lambda c: float(comp_weight.get(c, 1.0))).to_numpy()
+        weights = weights * cw
 
     # Équipes actives : poids cumulé suffisant (≈ nombre de matchs récents).
     wcount: dict[str, float] = {}

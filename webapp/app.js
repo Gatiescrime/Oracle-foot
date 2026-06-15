@@ -1,7 +1,16 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const pct = (p) => (p == null ? "—" : Math.round(p * 100) + "%");
+/* Honnêteté d'affichage : aucun match n'est jamais 100 % sûr. On n'affiche donc
+   jamais « 100 % » ni « 0 % » bruts sur les écarts extrêmes (ex. France-Gibraltar),
+   mais « >99 % » et « <1 % ». N'altère que l'affichage, pas les calculs. */
+const pct = (p) => {
+  if (p == null) return "—";
+  const v = p * 100;
+  if (v >= 99.5) return ">99%";
+  if (v > 0 && v < 0.5) return "<1%";
+  return Math.round(v) + "%";
+};
 const f2 = (x) => (x == null ? "—" : Number(x).toFixed(2));
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

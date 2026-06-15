@@ -52,7 +52,7 @@ def _fit_calibrator(df, domain, holdout_frac=0.25) -> ProbabilityCalibrator:
     if len(hold) < 200:
         return ProbabilityCalibrator()
 
-    dc = fit_dixon_coles(_dc_matches(train), verbose=False)
+    dc = fit_dixon_coles(_dc_matches(train), verbose=False, **config.dc_params(domain))
     xgb = XGBPoissonModel().fit(train) if len(train) >= 300 else None
     pred = EnsemblePredictor(dc, xgb, None, domain)
 
@@ -74,7 +74,7 @@ def train_domain(conn, domain: str) -> dict:
     paths = _paths(domain)
 
     log.info("[%s] Dixon-Coles sur %d matchs…", domain, len(df))
-    dc = fit_dixon_coles(_dc_matches(df), verbose=True)
+    dc = fit_dixon_coles(_dc_matches(df), verbose=True, **config.dc_params(domain))
     with open(paths["dc"], "w", encoding="utf-8") as f:
         json.dump(dc.to_dict(), f, ensure_ascii=False)
 

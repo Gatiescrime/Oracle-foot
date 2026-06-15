@@ -73,7 +73,7 @@ def run_backtest(conn, domain: str, n_folds: int = 6,
         train = df.iloc[:lo]
         test = df.iloc[lo:hi]
 
-        dc = fit_dixon_coles(_dc_matches(train), verbose=False)
+        dc = fit_dixon_coles(_dc_matches(train), verbose=False, **config.dc_params(domain))
         xgb = XGBPoissonModel().fit(train) if len(train) >= 300 else None
 
         calibrator = None
