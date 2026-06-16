@@ -714,21 +714,25 @@ function renderWcBilan(wc) {
       joué (ou bilan pas encore calculé). Dès qu'un match est joué, sa prédiction
       pré-match apparaîtra ici, face au résultat réel.</p></div>`;
   }
-  const favLabel = (m) => {
-    const a = [["home", m.p_home, m.home], ["draw", m.p_draw, "Match nul"], ["away", m.p_away, m.away]];
-    a.sort((x, y) => y[1] - x[1]);
-    const [k, p, lbl] = a[0];
-    return (k === "draw" ? "Match nul" : "Victoire " + lbl) + ` (${pct(p)})`;
+  // Issue 1X2 prédite = celle JUGÉE par la pastille (cohérente avec predicted_outcome).
+  const issueLabel = (m) => {
+    const o = m.predicted_outcome;            // 0 dom / 1 nul / 2 ext
+    const p = [m.p_home, m.p_draw, m.p_away][o];
+    const lbl = o === 1 ? "Nul" : "Victoire " + (o === 0 ? m.home : m.away);
+    return `${lbl} (${pct(p)})`;
   };
   const rows = wc.matches.map((m) => {
     const ok = m.correct_1x2 === 1;
     const verdict = ok ? `<span class="wc-ok">✓ juste</span>` : `<span class="wc-ko">✗ raté</span>`;
+    const exact = (m.ml_home === m.actual_home && m.ml_away === m.actual_away)
+      ? `<span class="wc-exact" title="Le score exact le plus probable correspond au score réel.">🎯 score exact</span>` : "";
     return `<div class="wc-match">
       <div class="wc-teams">${badgeHTML(m.home_badge)}${esc(m.home)} <span style="color:var(--faint)">–</span> ${badgeHTML(m.away_badge)}${esc(m.away)}</div>
-      <div class="wc-pred">Modèle : <strong>${esc(favLabel(m))}</strong>, score probable ${m.ml_home}–${m.ml_away}</div>
-      <div class="wc-real">Réel : <strong>${m.actual_home}–${m.actual_away}</strong> ${verdict}</div>
+      <div class="wc-pred">Issue prédite : <strong>${esc(issueLabel(m))}</strong><span class="wc-sub">score probable ${m.ml_home}–${m.ml_away}</span></div>
+      <div class="wc-real">Réel : <strong>${m.actual_home}–${m.actual_away}</strong> ${verdict}${exact}</div>
     </div>`;
   }).join("");
+  const legend = `<p class="track-note" style="margin-top:0">« ✓ juste / ✗ raté » juge l'<strong>issue</strong> (bon vainqueur ou nul) ; la mention <strong>🎯 score exact</strong> signale, à part, quand le score probable correspond aussi au score réel.</p>`;
   return `<div class="panel" style="border-color:rgba(120,170,255,0.25)">
     <h3 class="block-title">Coupe du Monde 2026 — bilan prédit vs réel <span class="info" tabindex="0" role="note" aria-label="Pour chaque match joué, ce que le modèle aurait prédit en n'utilisant QUE les matchs antérieurs à sa date (aucune fuite), face au résultat réel. Mesure walk-forward, distincte du journal de prédictions live.">i</span></h3>
     <p class="track-note" style="margin-top:0">Chaque match est prédit en n'utilisant QUE les données connues <strong>avant le coup d'envoi</strong> (modèle reconstruit sur les matchs antérieurs). C'est une mesure honnête, distincte de l'« historique réel » des prédictions live ci-dessus.</p>
@@ -738,6 +742,7 @@ function renderWcBilan(wc) {
       <div class="metric"><span class="m-label">RPS moyen</span><span class="m-value">${f3(wc.rps)}</span></div>
       <div class="metric"><span class="m-label">Score moyen prédit / réel</span><span class="m-value">${f2(wc.avg_pred_home_goals)}–${f2(wc.avg_pred_away_goals)} / ${f2(wc.avg_real_home_goals)}–${f2(wc.avg_real_away_goals)}</span></div>
     </div>
+    ${legend}
     <div class="wc-list">${rows}</div>
     <h4 class="track-sub">Calibration sur la Coupe du Monde</h4>
     ${calibrationTable(wc.calibration)}

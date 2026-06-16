@@ -221,9 +221,13 @@ option { background: #0c1322; }
   background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 14px; }
 .wc-teams { font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .wc-pred { font-size: 13px; color: var(--muted); }
+.wc-sub { color: var(--faint); margin-left: 8px; }
 .wc-real { font-size: 13px; text-align: right; white-space: nowrap; }
 .wc-ok { color: var(--green); font-weight: 600; margin-left: 6px; }
 .wc-ko { color: var(--red); font-weight: 600; margin-left: 6px; }
+/* « score exact » : indicateur SÉPARÉ de la pastille 1X2 (couleur distincte) */
+.wc-exact { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 600;
+  color: var(--violet); background: rgba(150, 130, 255, 0.16); padding: 1px 7px; border-radius: 6px; }
 @media (max-width: 640px) {
   .wc-match { grid-template-columns: 1fr; gap: 4px; }
   .wc-real { text-align: left; }

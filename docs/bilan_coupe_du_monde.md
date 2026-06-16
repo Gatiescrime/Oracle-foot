@@ -28,8 +28,18 @@ Dans la page **Track record**, un panneau « Coupe du Monde 2026 — bilan préd
 
 - **Bilan global** : taux de bon pronostic 1X2, RPS moyen, **score moyen prédit vs
   marqué**, et **courbe de calibration** sur la CdM.
-- **Match par match** : drapeaux des deux équipes, « **Modèle** : favori X (proba),
-  score probable a–b » en regard de « **Réel** : a–b », et une **pastille juste/raté**.
+- **Match par match** : drapeaux des deux équipes, « **Issue prédite** : Victoire X
+  (proba) / Nul » + le **score probable** a–b, en regard de « **Réel** : a–b », et une
+  **pastille ✓ juste / ✗ raté**.
+
+> **Sur quoi porte la pastille ?** La pastille **✓ juste / ✗ raté** juge l'**issue**
+> 1X2 (bon vainqueur ou nul), **pas** le score exact. C'est pourquoi l'issue prédite
+> est affichée explicitement. Un indicateur **séparé 🎯 « score exact »** signale, à
+> part, quand le score probable correspond aussi au score réel. Exemple parlant :
+> Qatar–Suisse, score 1–1 prédit *et* réel → 🎯 score exact, mais le modèle annonçait
+> une victoire suisse alors que c'est un nul → l'issue est **✗ ratée**. Une légende le
+> rappelle dans l'interface. (Affichage uniquement : les statistiques — bon pronostic
+> 1X2, RPS, score moyen — sont inchangées.)
 
 ## Calcul, coût, mise à jour
 
