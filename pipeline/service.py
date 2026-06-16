@@ -980,10 +980,26 @@ def track_record() -> dict:
     except Exception:  # noqa: BLE001
         live = {"available": False}
 
-    out = {"available": backtest is not None, "live": live}
+    # Bilan honnête de la Coupe du Monde (walk-forward anti-fuite, prédit vs réel).
+    try:
+        wc = _wc_bilan_enriched()
+    except Exception:  # noqa: BLE001
+        wc = {"available": False}
+
+    out = {"available": backtest is not None, "live": live, "wc": wc}
     if backtest is not None:
         out.update(backtest)
     return out
+
+
+def _wc_bilan_enriched() -> dict:
+    """Bilan CdM (fichier précalculé) enrichi des écussons/drapeaux pour l'affichage."""
+    from . import wc_bilan
+    b = wc_bilan.load()
+    for m in b.get("matches", []):
+        m["home_badge"] = badges.badge(m.get("home"), config.DOMAIN_INTL)
+        m["away_badge"] = badges.badge(m.get("away"), config.DOMAIN_INTL)
+    return b
 
 
 def qualitative_status() -> dict:

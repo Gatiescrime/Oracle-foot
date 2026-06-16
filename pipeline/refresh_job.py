@@ -33,7 +33,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from . import config, correction, db, features, journal, refresh, service, train
+from . import config, correction, db, features, journal, refresh, service, train, wc_bilan
 
 log = logging.getLogger("pipeline.refresh_job")
 
@@ -134,6 +134,12 @@ def _do_train(result: dict) -> None:
     """Phase 2 : réentraînement des modèles (légitimement long, budget dédié)."""
     try:
         train.train_all()
+        # Bilan CdM (walk-forward anti-fuite) : incrémental (seules les nouvelles dates
+        # sont recalculées) et best-effort -> n'échoue jamais le réentraînement.
+        try:
+            wc_bilan.update()
+        except Exception as e:  # noqa: BLE001
+            log.warning("bilan Coupe du Monde ignoré : %s", e)
         result["state"] = "done"
     except Exception as e:  # noqa: BLE001
         log.exception("Réentraînement en échec")

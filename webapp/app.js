@@ -705,10 +705,50 @@ function renderLiveTrackRecord(live) {
   </div>`;
 }
 
+function renderWcBilan(wc) {
+  // Bilan honnête CdM : prédiction PRÉ-MATCH (walk-forward anti-fuite) vs résultat réel.
+  if (!wc || !wc.available || !wc.n_matches) {
+    return `<div class="panel" style="border-color:rgba(120,170,255,0.25)">
+      <h3 class="block-title">Coupe du Monde 2026 — bilan prédit vs réel</h3>
+      <p class="track-note" style="margin-top:0">Aucun match de Coupe du Monde encore
+      joué (ou bilan pas encore calculé). Dès qu'un match est joué, sa prédiction
+      pré-match apparaîtra ici, face au résultat réel.</p></div>`;
+  }
+  const favLabel = (m) => {
+    const a = [["home", m.p_home, m.home], ["draw", m.p_draw, "Match nul"], ["away", m.p_away, m.away]];
+    a.sort((x, y) => y[1] - x[1]);
+    const [k, p, lbl] = a[0];
+    return (k === "draw" ? "Match nul" : "Victoire " + lbl) + ` (${pct(p)})`;
+  };
+  const rows = wc.matches.map((m) => {
+    const ok = m.correct_1x2 === 1;
+    const verdict = ok ? `<span class="wc-ok">✓ juste</span>` : `<span class="wc-ko">✗ raté</span>`;
+    return `<div class="wc-match">
+      <div class="wc-teams">${badgeHTML(m.home_badge)}${esc(m.home)} <span style="color:var(--faint)">–</span> ${badgeHTML(m.away_badge)}${esc(m.away)}</div>
+      <div class="wc-pred">Modèle : <strong>${esc(favLabel(m))}</strong>, score probable ${m.ml_home}–${m.ml_away}</div>
+      <div class="wc-real">Réel : <strong>${m.actual_home}–${m.actual_away}</strong> ${verdict}</div>
+    </div>`;
+  }).join("");
+  return `<div class="panel" style="border-color:rgba(120,170,255,0.25)">
+    <h3 class="block-title">Coupe du Monde 2026 — bilan prédit vs réel <span class="info" tabindex="0" role="note" aria-label="Pour chaque match joué, ce que le modèle aurait prédit en n'utilisant QUE les matchs antérieurs à sa date (aucune fuite), face au résultat réel. Mesure walk-forward, distincte du journal de prédictions live.">i</span></h3>
+    <p class="track-note" style="margin-top:0">Chaque match est prédit en n'utilisant QUE les données connues <strong>avant le coup d'envoi</strong> (modèle reconstruit sur les matchs antérieurs). C'est une mesure honnête, distincte de l'« historique réel » des prédictions live ci-dessus.</p>
+    <div class="metrics">
+      <div class="metric"><span class="m-label">Matchs joués évalués</span><span class="m-value">${intFmt(wc.n_matches)}</span></div>
+      <div class="metric"><span class="m-label">Bon pronostic 1X2</span><span class="m-value">${pct(wc.accuracy)}</span></div>
+      <div class="metric"><span class="m-label">RPS moyen</span><span class="m-value">${f3(wc.rps)}</span></div>
+      <div class="metric"><span class="m-label">Score moyen prédit / réel</span><span class="m-value">${f2(wc.avg_pred_home_goals)}–${f2(wc.avg_pred_away_goals)} / ${f2(wc.avg_real_home_goals)}–${f2(wc.avg_real_away_goals)}</span></div>
+    </div>
+    <div class="wc-list">${rows}</div>
+    <h4 class="track-sub">Calibration sur la Coupe du Monde</h4>
+    ${calibrationTable(wc.calibration)}
+  </div>`;
+}
+
 function renderTrackRecord(data) {
   const live = renderLiveTrackRecord(data.live);
+  const wc = renderWcBilan(data.wc);
   if (!data.available) {
-    return live +
+    return live + wc +
       `<p class="track-note" style="text-align:center">Le backtest historique n'est pas encore généré (<code>python -m pipeline.backtest</code>).</p>`;
   }
   const club = data.club || {};
@@ -756,7 +796,7 @@ function renderTrackRecord(data) {
 
   const backtestIntro =
     `<h3 class="block-title" style="margin-top:8px">Backtest historique (walk-forward)</h3>`;
-  return live + backtestIntro + intro + clubPanel + intlPanel +
+  return live + wc + backtestIntro + intro + clubPanel + intlPanel +
     `<p class="track-note" style="text-align:center">Reproductible : <code>python -m pipeline.backtest</code>. Les probabilités sont des estimations, pas des certitudes.</p>`;
 }
 
@@ -766,7 +806,7 @@ async function loadTrackRecord(force) {
   host.innerHTML = '<p style="color:var(--muted)">Chargement…</p>';
   try {
     const data = await api("/api/track-record");
-    if (!data.available && !(data.live && data.live.available)) {
+    if (!data.available && !(data.live && data.live.available) && !(data.wc && data.wc.available)) {
       host.innerHTML = '<p style="color:var(--muted)">Aucun historique pour le moment. Lance <code>python -m pipeline.backtest</code> pour le backtest ; l\'historique réel se remplit au fil des matchs prédits puis joués.</p>';
       return;
     }

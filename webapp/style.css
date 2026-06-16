@@ -215,6 +215,20 @@ option { background: #0c1322; }
 .m-value { display: block; font-size: 22px; font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; }
 .m-note { display: block; font-size: 11px; color: var(--faint); margin-top: 2px; }
 
+/* Bilan Coupe du Monde : liste match par match (prédit vs réel) */
+.wc-list { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.wc-match { display: grid; grid-template-columns: 1.4fr 1.6fr auto; gap: 10px; align-items: center;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 14px; }
+.wc-teams { font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wc-pred { font-size: 13px; color: var(--muted); }
+.wc-real { font-size: 13px; text-align: right; white-space: nowrap; }
+.wc-ok { color: var(--green); font-weight: 600; margin-left: 6px; }
+.wc-ko { color: var(--red); font-weight: 600; margin-left: 6px; }
+@media (max-width: 640px) {
+  .wc-match { grid-template-columns: 1fr; gap: 4px; }
+  .wc-real { text-align: left; }
+}
+
 /* actu */
 .actu .fact { padding: 10px 0; border-top: 1px solid var(--line); }
 .actu .fact:first-child { border-top: 0; }
